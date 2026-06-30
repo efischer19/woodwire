@@ -327,7 +327,6 @@ function startAttachmentUpload(file, elements, state) {
       globalThis.crypto?.randomUUID?.() ||
       `attachment-${Date.now()}-${fallbackAttachmentCounter}`,
     key: "",
-    linkUrl: URL.createObjectURL(file),
     name: file.name,
     previewUrl: null,
     progress: 0,
@@ -434,7 +433,7 @@ function uploadAttachmentFile(uploadUrl, file, onProgress, attachment) {
     });
     request.addEventListener("abort", () => {
       attachment.uploadAbortController = null;
-      reject({ aborted: true });
+      reject(Object.assign(new Error("Upload aborted"), { aborted: true }));
     });
     request.send(file);
   });
@@ -464,10 +463,6 @@ function removeComposerAttachment(attachmentId, elements, state) {
 
   const [attachment] = state.composerAttachments.splice(attachmentIndex, 1);
   attachment.uploadAbortController?.();
-
-  if (attachment.status !== "uploaded") {
-    URL.revokeObjectURL(attachment.linkUrl);
-  }
 
   renderPendingAttachments(elements, state);
   refreshComposerControls(elements, state);
@@ -1074,7 +1069,7 @@ function createStoredAttachment(attachment, includeLocalUrls = false) {
   return {
     contentType: attachment.contentType,
     key: attachment.key,
-    linkUrl: includeLocalUrls ? attachment.linkUrl || attachment.previewUrl || null : null,
+    linkUrl: includeLocalUrls ? attachment.linkUrl || null : null,
     name: attachment.name,
     previewUrl: includeLocalUrls ? attachment.previewUrl || null : null,
   };
@@ -1109,7 +1104,7 @@ function createMessageAttachments(elements, attachments) {
     const item = document.createElement("li");
     const name = attachment.name || attachment.key || "Attachment";
     const imageUrl = attachment.previewUrl || null;
-    const linkUrl = attachment.linkUrl || imageUrl;
+    const linkUrl = attachment.linkUrl || null;
 
     if (attachment.contentType.startsWith("image/")) {
       const link = document.createElement("a");

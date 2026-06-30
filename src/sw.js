@@ -1,9 +1,10 @@
 "use strict";
 
 const APP_SHELL_CACHE = "woodwire-app-shell-v1";
+const FALLBACK_PAGE = "./index.html";
 const APP_SHELL_ASSETS = [
   "./",
-  "./index.html",
+  FALLBACK_PAGE,
   "./manifest.json",
   "./assets/favicon.svg",
   "./assets/icon-192.png",
@@ -70,7 +71,7 @@ self.addEventListener("fetch", (event) => {
         })
         .catch(() => {
           if (request.mode === "navigate") {
-            return caches.match("./index.html");
+            return caches.match(FALLBACK_PAGE);
           }
 
           throw new Error("Network request failed");

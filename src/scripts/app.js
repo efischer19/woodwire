@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
   queue: "woodwire_queue",
 };
 const POLL_INTERVAL_MS = 3000;
+const SERVICE_WORKER_PATH = "sw.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   initThemeToggle();
@@ -147,6 +148,7 @@ function getAppElements() {
     passphrase: document.getElementById("passphrase"),
     queueStatus: document.getElementById("queue-status"),
     screenReaderStatus: document.getElementById("screen-reader-status"),
+    sendButton: document.getElementById("send-button"),
     setupForm: document.getElementById("setup-form"),
     setupPanel: document.getElementById("setup-panel"),
     workerUrl: document.getElementById("worker-url"),
@@ -162,7 +164,7 @@ function hydrateSetupForm(elements) {
 function updateConnectionUi(elements) {
   const hasAuth = Boolean(getStorageItem(STORAGE_KEYS.auth));
   elements.messageInput.disabled = !hasAuth;
-  elements.composer.querySelector("button[type='submit']").disabled = !hasAuth;
+  elements.sendButton.disabled = !hasAuth;
   elements.connectionSettings.textContent = hasAuth
     ? "Update connection"
     : "Connection settings";
@@ -549,7 +551,7 @@ function registerServiceWorker() {
   }
 
   window.addEventListener("load", () => {
-    const serviceWorkerUrl = new URL("sw.js", window.location.href).toString();
+    const serviceWorkerUrl = new URL(SERVICE_WORKER_PATH, window.location.href).toString();
     navigator.serviceWorker.register(serviceWorkerUrl).catch(() => {
       // Ignore registration failures in unsupported local environments.
     });

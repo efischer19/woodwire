@@ -2,7 +2,7 @@
 
 > **This document is inherited from the [blueprint-repo-blueprints](https://github.com/efischer19/blueprint-repo-blueprints) template system.** Downstream repositories should customize this document to fit their specific context, but should not weaken the core principles defined here.
 
-This document outlines the core principles that guide all development within the `{{PROJECT_NAME}}` project. As a contributor (human or AI), you are expected to understand and adhere to these principles in all generated code, commits, and pull requests.
+This document outlines the core principles that guide all development within the `Woodwire` project. As a contributor (human or AI), you are expected to understand and adhere to these principles in all generated code, commits, and pull requests.
 
 Our guiding star is a quote from the essay [*Programming Sucks*](https://www.stilldrinking.org/programming-sucks): **"All code is bad"**
 

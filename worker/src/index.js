@@ -29,7 +29,27 @@ const ALLOWED_CONTENT_TYPE_PREFIXES = ['audio/', 'image/', 'text/'];
 const ALLOWED_CONTENT_TYPES = new Set(['application/pdf']);
 const FILENAME_EXTENSION_PATTERN = new RegExp(
   `\\.([a-z0-9]{1,${MAX_FILENAME_EXTENSION_LENGTH}})$`,
+  'i',
 );
+const DEFAULT_EXTENSION_BY_CONTENT_TYPE = {
+  'application/pdf': '.pdf',
+  'audio/aac': '.aac',
+  'audio/flac': '.flac',
+  'audio/m4a': '.m4a',
+  'audio/mp4': '.mp4',
+  'audio/mpeg': '.mp3',
+  'audio/ogg': '.ogg',
+  'audio/wav': '.wav',
+  'audio/webm': '.webm',
+  'image/gif': '.gif',
+  'image/heic': '.heic',
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'text/csv': '.csv',
+  'text/markdown': '.md',
+  'text/plain': '.txt',
+};
 
 export function createWorker(dependencies = {}) {
   return {
@@ -256,7 +276,7 @@ async function handleUploadUrlRequest(request, env, dependencies) {
   const timestamp = dependencies.now?.() ?? Date.now();
   const conversationId = crypto.randomUUID();
   const objectId = crypto.randomUUID();
-  const extension = getFilenameExtension(validation.filename);
+  const extension = getFilenameExtension(validation.filename, validation.contentType);
   const key = `attachments/${conversationId}/${timestamp}-${objectId}${extension}`;
   const s3Client = createS3Client(env, dependencies);
 
@@ -433,21 +453,15 @@ function validateUploadUrlPayload(body) {
 }
 
 function getUploadSizeBytes(body) {
-  const candidates = ['sizeBytes', 'fileSizeBytes', 'contentLengthBytes'];
-
-  for (const field of candidates) {
-    if (!(field in body) || body[field] === undefined || body[field] === null) {
-      continue;
-    }
-
-    if (!Number.isInteger(body[field]) || body[field] < 0) {
-      return { error: `Field "${field}" must be a non-negative integer` };
-    }
-
-    return { value: body[field] };
+  if (!('sizeBytes' in body) || body.sizeBytes === undefined || body.sizeBytes === null) {
+    return { value: null };
   }
 
-  return { value: null };
+  if (!Number.isInteger(body.sizeBytes) || body.sizeBytes < 0) {
+    return { error: 'Field "sizeBytes" must be a non-negative integer' };
+  }
+
+  return { value: body.sizeBytes };
 }
 
 function normalizeContentType(contentType) {
@@ -461,10 +475,14 @@ function isAllowedContentType(contentType) {
   );
 }
 
-function getFilenameExtension(filename) {
-  const match = filename.trim().toLowerCase().match(FILENAME_EXTENSION_PATTERN);
+function getFilenameExtension(filename, contentType) {
+  const match = filename.trim().match(FILENAME_EXTENSION_PATTERN);
 
-  return match ? `.${match[1]}` : '';
+  if (match) {
+    return `.${match[1].toLowerCase()}`;
+  }
+
+  return DEFAULT_EXTENSION_BY_CONTENT_TYPE[contentType] ?? '';
 }
 
 async function isAuthorized(request, env) {

@@ -161,8 +161,10 @@ Reserves a pre-signed S3 upload URL for an attachment.
 ```
 
 `sizeBytes` is optional but recommended so the Worker can reject uploads larger
-than 25 MB before issuing a URL. Allowed MIME types are `image/*`, `audio/*`,
-`text/*`, and `application/pdf`.
+than 25 MB before issuing a URL. If `sizeBytes` is omitted, the Worker still
+validates the filename and `contentType` but cannot perform the 25 MB preflight
+size check. Allowed MIME types are `image/*`, `audio/*`, `text/*`, and
+`application/pdf`.
 
 **Success response**
 

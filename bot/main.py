@@ -203,7 +203,7 @@ class WoodwireBot:
                 downloaded_attachments = []
 
             if not message_text and not downloaded_attachments:
-                raise ValueError("Message payload is missing text")
+                raise ValueError("Message payload is missing both text and attachments")
 
             prompt_text, voice_response_enabled = self.build_backend_message(
                 message_text,

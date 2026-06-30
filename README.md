@@ -92,8 +92,9 @@ Voice memo processing is enabled automatically for `audio/webm`, `audio/mp4`,
 and `audio/ogg` attachments when local STT/TTS tooling is installed. The bot
 expects `ffmpeg` on `PATH`, uses `STT_ENGINE` (defaults to `faster-whisper`)
 for transcription, and uses `TTS_ENGINE` (defaults to `piper`) for speech
-synthesis. To enable Piper, also set `PIPER_MODEL_PATH` (or `PIPER_MODEL`) to
-your local voice model file. If those optional engines are unavailable, the bot
+synthesis. To enable Piper, set `PIPER_MODEL_PATH` to your local voice model
+file; the bot also honors `PIPER_MODEL` as a fallback alias when
+`PIPER_MODEL_PATH` is unset. If those optional engines are unavailable, the bot
 logs a warning and falls back to text-only processing without uploading an MP3
 response. Budget at least 2 GB RAM and roughly 2 GB of disk space for local
 voice models on Raspberry Pi-class hardware.

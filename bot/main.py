@@ -123,7 +123,7 @@ class WoodwireBot:
 
             try:
                 self.handle_message(messages[0])
-            except Exception as error:  # noqa: BLE001
+            except Exception as error:
                 self.logger.error("Message processing failed: %s", error)
 
         self.logger.info("SQS consumer loop stopped")

@@ -147,7 +147,7 @@ Configure the following in **Settings → Secrets and variables → Actions → 
 #### Enabling the Workflow
 
 1. Provision the AWS resources listed above.
-2. Add the `AWS_ROLE_ARN`, `AWS_REGION`, `S3_BUCKET_NAME`, and `CLOUDFRONT_DISTRIBUTION_ID` repository variables in **Settings → Secrets and variables → Actions → Variables**.
+2. Add the repository variables from the **GitHub Repository Variables** table above in **Settings → Secrets and variables → Actions → Variables**.
 3. Go to **Actions → Deploy to AWS (S3 + CloudFront)** and click **Run workflow** to trigger a manual deployment.
 4. Push a change to `src/` on `main` to use the automatic path-scoped deployment.
 

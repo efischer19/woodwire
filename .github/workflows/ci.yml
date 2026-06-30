@@ -15,7 +15,7 @@ jobs:
     name: Detect source changes
     runs-on: ubuntu-latest
     outputs:
-      frontend: ${{ steps.default.outputs.frontend || steps.filter.outputs.frontend }}
+      frontend: ${{ steps.frontend.outputs.frontend }}
     steps:
       - name: Checkout code
         if: github.event_name == 'push'
@@ -30,10 +30,14 @@ jobs:
             frontend:
               - 'src/**'
 
-      - name: Default to frontend lint on PR and manual runs
-        if: github.event_name != 'push'
-        id: default
-        run: echo "frontend=true" >> "$GITHUB_OUTPUT"
+      - name: Decide whether frontend lint should run
+        id: frontend
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "frontend=${{ steps.filter.outputs.frontend }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+          fi
 
   quality-checks:
     name: Quality Checks

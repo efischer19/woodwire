@@ -1581,8 +1581,9 @@ function renderVoiceMemoState(elements, state) {
   } else if (elements.voiceMemoAudio.hasAttribute("src")) {
     elements.voiceMemoAudio.removeAttribute("src");
     elements.voiceMemoAudio.load();
-    elements.voiceMemoPreviewSummary.textContent = VOICE_MEMO_READY_TEXT;
-  } else {
+  }
+
+  if (!hasPreview) {
     elements.voiceMemoPreviewSummary.textContent = VOICE_MEMO_READY_TEXT;
   }
 }

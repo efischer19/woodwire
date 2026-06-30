@@ -1,4 +1,10 @@
-import { ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
+import {
+  GetObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 
 const AUTH_HEADER = 'X-Woodwire-Auth';
@@ -10,11 +16,16 @@ const SECURITY_HEADERS = {
 };
 const RATE_LIMIT_STORE = new Map();
 const STATUS_PROCESSING_KEY = 'processing.json';
+const UPLOAD_URL_EXPIRY_SECONDS = 5 * 60;
+const DOWNLOAD_URL_EXPIRY_SECONDS = 15 * 60;
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const STATUS_CACHE_TTL_SECONDS = 3;
 const STATUS_CACHE_MIN_SECONDS = 2;
 const STATUS_CACHE_MAX_SECONDS = 5;
 const DEFAULT_RATE_LIMIT_REQUESTS = 30;
 const DEFAULT_RATE_LIMIT_WINDOW_SECONDS = 60;
+const ALLOWED_CONTENT_TYPE_PREFIXES = ['audio/', 'image/', 'text/'];
+const ALLOWED_CONTENT_TYPES = new Set(['application/pdf']);
 
 export function createWorker(dependencies = {}) {
   return {
@@ -77,10 +88,7 @@ export async function handleRequest(request, env, context = {}, dependencies = {
       return methodNotAllowed(request, env, 'POST, OPTIONS');
     }
 
-    return createResponse(request, env, 501, {
-      error: 'Not Implemented',
-      message: 'Attachment upload URL generation is implemented in ticket 07.',
-    });
+    return handleUploadUrlRequest(request, env, dependencies);
   }
 
   if (url.pathname.startsWith('/api/status/')) {
@@ -96,10 +104,7 @@ export async function handleRequest(request, env, context = {}, dependencies = {
       return methodNotAllowed(request, env, 'GET, OPTIONS');
     }
 
-    return createResponse(request, env, 501, {
-      error: 'Not Implemented',
-      message: 'Response retrieval is implemented in ticket 07.',
-    });
+    return handleResponseRequest(request, env, dependencies);
   }
 
   return createResponse(request, env, 404, { error: 'Not Found' });
@@ -180,12 +185,7 @@ async function handleStatusRequest(request, env, context, dependencies) {
   }
 
   const prefix = `outbox/${conversationId}/`;
-  const s3Client =
-    dependencies.createS3Client?.(env) ??
-    new S3Client({
-      credentials: buildAwsCredentials(env),
-      region: env.AWS_REGION ?? 'us-east-1',
-    });
+  const s3Client = createS3Client(env, dependencies);
 
   let listResponse;
 
@@ -230,6 +230,101 @@ async function handleStatusRequest(request, env, context, dependencies) {
   return response;
 }
 
+async function handleUploadUrlRequest(request, env, dependencies) {
+  let body;
+
+  try {
+    body = await readJson(request);
+  } catch {
+    return createResponse(request, env, 400, { error: 'Invalid request body' });
+  }
+
+  const validation = validateUploadUrlPayload(body);
+
+  if (validation.error) {
+    return createResponse(request, env, validation.status, { error: validation.error });
+  }
+
+  if (!env.CHAT_BUCKET_NAME) {
+    return createResponse(request, env, 500, { error: 'Internal Server Error' });
+  }
+
+  const timestamp = dependencies.now?.() ?? Date.now();
+  const conversationId = crypto.randomUUID();
+  const objectId = crypto.randomUUID();
+  const extension = getFilenameExtension(validation.filename);
+  const key = `attachments/${conversationId}/${timestamp}-${objectId}${extension}`;
+  const s3Client = createS3Client(env, dependencies);
+
+  try {
+    const uploadUrl = await signS3Command(
+      s3Client,
+      new PutObjectCommand({
+        Bucket: env.CHAT_BUCKET_NAME,
+        ContentType: validation.contentType,
+        Key: key,
+      }),
+      UPLOAD_URL_EXPIRY_SECONDS,
+      dependencies,
+    );
+
+    return createResponse(request, env, 200, { key, uploadUrl });
+  } catch {
+    return createResponse(request, env, 502, { error: 'Bad Gateway' });
+  }
+}
+
+async function handleResponseRequest(request, env, dependencies) {
+  const pathname = new URL(request.url).pathname;
+  const conversationId = pathname.slice('/api/response/'.length);
+
+  if (!isValidConversationId(conversationId)) {
+    return createResponse(request, env, 400, { error: 'Invalid conversation ID' });
+  }
+
+  if (!env.CHAT_BUCKET_NAME) {
+    return createResponse(request, env, 500, { error: 'Internal Server Error' });
+  }
+
+  const prefix = `outbox/${conversationId}/`;
+  const s3Client = createS3Client(env, dependencies);
+  let listResponse;
+
+  try {
+    listResponse = await s3Client.send(
+      new ListObjectsV2Command({
+        Bucket: env.CHAT_BUCKET_NAME,
+        MaxKeys: 25,
+        Prefix: prefix,
+      }),
+    );
+  } catch {
+    return createResponse(request, env, 502, { error: 'Bad Gateway' });
+  }
+
+  const key = findResponseObjectKey(prefix, listResponse.Contents ?? []);
+
+  if (!key) {
+    return createResponse(request, env, 404, { error: 'Response not found' });
+  }
+
+  try {
+    const downloadUrl = await signS3Command(
+      s3Client,
+      new GetObjectCommand({
+        Bucket: env.CHAT_BUCKET_NAME,
+        Key: key,
+      }),
+      DOWNLOAD_URL_EXPIRY_SECONDS,
+      dependencies,
+    );
+
+    return createResponse(request, env, 200, { downloadUrl, key });
+  } catch {
+    return createResponse(request, env, 502, { error: 'Bad Gateway' });
+  }
+}
+
 function validateMessagePayload(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return 'Request body must be a JSON object';
@@ -268,6 +363,14 @@ function deriveConversationStatus(prefix, objects) {
   return 'pending';
 }
 
+function findResponseObjectKey(prefix, objects) {
+  const processingKey = `${prefix}${STATUS_PROCESSING_KEY}`;
+
+  return objects
+    .map((object) => object?.Key)
+    .find((key) => typeof key === 'string' && key !== processingKey);
+}
+
 async function readJson(request) {
   const contentType = request.headers.get('content-type') ?? '';
 
@@ -286,6 +389,76 @@ function validateOrigin(request, env) {
   }
 
   return { allowed: origin === env.PWA_ORIGIN };
+}
+
+function validateUploadUrlPayload(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { error: 'Request body must be a JSON object', status: 400 };
+  }
+
+  if (typeof body.filename !== 'string' || body.filename.trim() === '') {
+    return { error: 'Field "filename" must be a non-empty string', status: 400 };
+  }
+
+  if (typeof body.contentType !== 'string' || body.contentType.trim() === '') {
+    return { error: 'Field "contentType" must be a non-empty string', status: 400 };
+  }
+
+  const contentType = normalizeContentType(body.contentType);
+
+  if (!isAllowedContentType(contentType)) {
+    return { error: 'Field "contentType" is not allowed', status: 400 };
+  }
+
+  const sizeBytes = getUploadSizeBytes(body);
+
+  if (sizeBytes.error) {
+    return { error: sizeBytes.error, status: 400 };
+  }
+
+  if (sizeBytes.value !== null && sizeBytes.value > MAX_UPLOAD_BYTES) {
+    return { error: 'Attachments must be 25 MB or smaller', status: 413 };
+  }
+
+  return {
+    contentType,
+    filename: body.filename.trim(),
+  };
+}
+
+function getUploadSizeBytes(body) {
+  const candidates = ['sizeBytes', 'fileSizeBytes', 'contentLengthBytes'];
+
+  for (const field of candidates) {
+    if (!(field in body) || body[field] === undefined || body[field] === null) {
+      continue;
+    }
+
+    if (!Number.isInteger(body[field]) || body[field] < 0) {
+      return { error: `Field "${field}" must be a non-negative integer` };
+    }
+
+    return { value: body[field] };
+  }
+
+  return { value: null };
+}
+
+function normalizeContentType(contentType) {
+  return contentType.split(';', 1)[0].trim().toLowerCase();
+}
+
+function isAllowedContentType(contentType) {
+  return (
+    ALLOWED_CONTENT_TYPES.has(contentType) ||
+    ALLOWED_CONTENT_TYPE_PREFIXES.some((prefix) => contentType.startsWith(prefix))
+  );
+}
+
+function getFilenameExtension(filename) {
+  const match = filename.trim().toLowerCase().match(/\.([a-z0-9]{1,16})$/);
+
+  return match ? `.${match[1]}` : '';
 }
 
 async function isAuthorized(request, env) {
@@ -365,6 +538,22 @@ function getStatusCacheTtl(env) {
   const rawTtl = parsePositiveInt(env.STATUS_CACHE_TTL_SECONDS, STATUS_CACHE_TTL_SECONDS);
 
   return Math.min(STATUS_CACHE_MAX_SECONDS, Math.max(STATUS_CACHE_MIN_SECONDS, rawTtl));
+}
+
+function createS3Client(env, dependencies) {
+  return (
+    dependencies.createS3Client?.(env) ??
+    new S3Client({
+      credentials: buildAwsCredentials(env),
+      region: env.AWS_REGION ?? 'us-east-1',
+    })
+  );
+}
+
+async function signS3Command(s3Client, command, expiresIn, dependencies) {
+  const signer = dependencies.signS3Url ?? getSignedUrl;
+
+  return signer(s3Client, command, { expiresIn });
 }
 
 function parsePositiveInt(value, fallback) {

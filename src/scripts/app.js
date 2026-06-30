@@ -415,6 +415,8 @@ function uploadAttachmentFile(uploadUrl, file, onProgress, attachment) {
         return;
       }
 
+      // Keep 100% reserved for a confirmed server response so the UI does not
+      // imply success before S3 accepts the upload.
       onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
     });
     request.addEventListener("load", () => {
@@ -1089,10 +1091,14 @@ function normalizeStoredAttachments(attachments = []) {
       contentType: attachment.contentType || "",
       key: attachment.key || "",
       linkUrl: attachment.linkUrl || null,
-      name: attachment.name || attachment.key || "Attachment",
+      name: getAttachmentDisplayName(attachment),
       previewUrl: attachment.previewUrl || null,
     }))
     .filter((attachment) => attachment.key || attachment.linkUrl || attachment.previewUrl);
+}
+
+function getAttachmentDisplayName(attachment) {
+  return attachment.name || attachment.key || "Attachment";
 }
 
 function createMessageAttachments(elements, attachments) {
@@ -1101,7 +1107,7 @@ function createMessageAttachments(elements, attachments) {
 
   for (const attachment of attachments.map((item) => createStoredAttachment(item, true))) {
     const item = document.createElement("li");
-    const name = attachment.name || attachment.key || "Attachment";
+    const name = getAttachmentDisplayName(attachment);
     const imageUrl = attachment.previewUrl || null;
     const linkUrl = attachment.linkUrl || null;
 

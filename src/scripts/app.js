@@ -1562,13 +1562,13 @@ function renderVoiceMemoState(elements, state) {
   elements.voiceMemoButtonText.textContent = state.voiceMemo.isRecording
     ? "Stop"
     : hasPreview
-      ? "Record again"
+      ? "Re-record"
       : "Record";
   elements.voiceMemoElapsed.textContent = `Recording… ${formatElapsedTime(state.voiceMemo.durationMs)}`;
 
   if (hasPreview) {
     elements.voiceMemoAudio.src = state.voiceMemo.previewUrl;
-    elements.voiceMemoPreviewSummary.textContent = `Voice memo ready · ${formatElapsedTime(state.voiceMemo.durationMs)}`;
+    elements.voiceMemoPreviewSummary.textContent = `Voice memo ready - ${formatElapsedTime(state.voiceMemo.durationMs)}`;
   } else if (elements.voiceMemoAudio.hasAttribute("src")) {
     elements.voiceMemoAudio.removeAttribute("src");
     elements.voiceMemoAudio.load();

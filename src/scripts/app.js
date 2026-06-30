@@ -73,48 +73,54 @@ function initChatApp() {
   elements.composer.addEventListener("submit", async (event) => {
     event.preventDefault();
 
-    const text = elements.messageInput.value.trim();
-    if (!text) {
-      return;
-    }
+    try {
+      const text = elements.messageInput.value.trim();
+      if (!text) {
+        return;
+      }
 
-    if (!getStorageItem(STORAGE_KEYS.auth)) {
-      toggleSetupPanel(elements, true);
-      showFlashMessage(elements, "Save your passphrase before sending a message.", true);
-      elements.passphrase.focus();
-      return;
-    }
+      if (!getStorageItem(STORAGE_KEYS.auth)) {
+        toggleSetupPanel(elements, true);
+        showFlashMessage(elements, "Save your passphrase before sending a message.", true);
+        elements.passphrase.focus();
+        return;
+      }
 
-    const localMessage = createLocalMessage(text);
-    appendMessage(elements, {
-      author: "You",
-      localId: localMessage.localId,
-      status: navigator.onLine ? "Sending…" : "Queued for delivery",
-      text: localMessage.text,
-      timestamp: localMessage.createdAt,
-      variant: "user",
-    });
+      const localMessage = createLocalMessage(text);
+      appendMessage(elements, {
+        author: "You",
+        localId: localMessage.localId,
+        status: navigator.onLine ? "Sending…" : "Queued for delivery",
+        text: localMessage.text,
+        timestamp: localMessage.createdAt,
+        variant: "user",
+      });
 
-    elements.messageInput.value = "";
+      elements.messageInput.value = "";
 
-    if (!navigator.onLine) {
-      enqueueMessage(localMessage);
-      updateQueueStatus(elements);
-      announce(elements, "Message queued until you are back online.");
-      return;
-    }
+      if (!navigator.onLine) {
+        enqueueMessage(localMessage);
+        updateQueueStatus(elements);
+        announce(elements, "Message queued until you are back online.");
+        return;
+      }
 
-    const sendState = await sendMessage(localMessage, elements, state);
-    if (sendState === "queued") {
-      enqueueMessage(localMessage);
-      updateQueueStatus(elements);
+      const sendState = await sendMessage(localMessage, elements, state);
+      if (sendState === "queued") {
+        enqueueMessage(localMessage);
+        updateQueueStatus(elements);
+      }
+    } catch {
+      showFlashMessage(elements, "The message could not be prepared for sending.", true);
     }
   });
 
   window.addEventListener("online", () => {
     updateConnectivity(elements);
     showFlashMessage(elements, "Back online. Sending queued messages.");
-    void drainQueue(elements, state);
+    void drainQueue(elements, state).catch(() => {
+      showFlashMessage(elements, "Queued messages could not be resent.", true);
+    });
   });
 
   window.addEventListener("offline", () => {
@@ -124,7 +130,9 @@ function initChatApp() {
   });
 
   if (navigator.onLine) {
-    void drainQueue(elements, state);
+    void drainQueue(elements, state).catch(() => {
+      showFlashMessage(elements, "Queued messages could not be resent.", true);
+    });
   }
 }
 
@@ -183,7 +191,9 @@ function announce(elements, message) {
 function createLocalMessage(text) {
   return {
     createdAt: new Date().toISOString(),
-    localId: globalThis.crypto?.randomUUID?.() || `local-${Date.now()}`,
+    localId:
+      globalThis.crypto?.randomUUID?.() ||
+      `local-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     text,
   };
 }
@@ -539,7 +549,7 @@ function registerServiceWorker() {
   }
 
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch(() => {
+    navigator.serviceWorker.register(new URL("sw.js", window.location.href)).catch(() => {
       // Ignore registration failures in unsupported local environments.
     });
   });

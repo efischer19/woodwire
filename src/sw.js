@@ -58,7 +58,12 @@ self.addEventListener("fetch", (event) => {
         .then((networkResponse) => {
           if (networkResponse.ok) {
             const responseClone = networkResponse.clone();
-            void caches.open(APP_SHELL_CACHE).then((cache) => cache.put(request, responseClone));
+            void caches
+              .open(APP_SHELL_CACHE)
+              .then((cache) => cache.put(request, responseClone))
+              .catch(() => {
+                // Ignore best-effort cache write failures.
+              });
           }
 
           return networkResponse;

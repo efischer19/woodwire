@@ -1,0 +1,290 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Least-privilege IAM users, managed policies, GitHub Actions OIDC role, and a
+  billing alarm for Woodwire. Deploy this stack in us-east-1 so the billing
+  alarm can monitor AWS/Billing EstimatedCharges.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: woodwire
+    AllowedPattern: '^[a-z0-9-]+$'
+    Description: Prefix used when naming IAM resources and the billing alarm.
+  ChatBucketName:
+    Type: String
+    Description: Name of the private S3 bucket used for inbox, outbox, and attachments prefixes.
+  ChatQueueArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:sqs:[^:]+:[0-9]{12}:.+$'
+    Description: ARN of the SQS queue used for bot message delivery.
+  PwaHostingBucketName:
+    Type: String
+    Description: Name of the S3 bucket that hosts the static PWA.
+  CloudFrontDistributionId:
+    Type: String
+    AllowedPattern: '^[A-Z0-9]+$'
+    Description: CloudFront distribution ID used by the GitHub Actions deployment workflow.
+  GitHubRepositoryOwner:
+    Type: String
+    Description: GitHub repository owner allowed to assume the deployment role.
+  GitHubRepositoryName:
+    Type: String
+    Description: GitHub repository name allowed to assume the deployment role.
+  GitHubBranchName:
+    Type: String
+    Default: main
+    Description: Branch allowed to assume the GitHub Actions deployment role.
+  GitHubOidcProviderArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:iam::[0-9]{12}:oidc-provider/.+$'
+    Description: ARN of the existing GitHub Actions OIDC provider.
+  BillingAlarmSnsTopicArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:sns:us-east-1:[0-9]{12}:.+$'
+    Description: SNS topic ARN in us-east-1 that receives billing alarm notifications.
+
+Resources:
+  LocalBotUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName:
+        Fn::Sub: '${ProjectName}-local-bot'
+
+  LocalBotManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: '${ProjectName}-local-bot'
+      Users:
+        - Ref: LocalBotUser
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowQueueReceiveAndAcknowledge
+            Effect: Allow
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:ChangeMessageVisibility
+            Resource:
+              Ref: ChatQueueArn
+          - Sid: AllowChatObjectReadWrite
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: 'arn:${AWS::Partition}:s3:::${ChatBucketName}/inbox/*'
+              - Fn::Sub: 'arn:${AWS::Partition}:s3:::${ChatBucketName}/outbox/*'
+              - Fn::Sub: 'arn:${AWS::Partition}:s3:::${ChatBucketName}/attachments/*'
+          - Sid: DenyBucketLevelS3Actions
+            Effect: Deny
+            Action:
+              - s3:*
+            Resource:
+              Fn::Sub: 'arn:${AWS::Partition}:s3:::${ChatBucketName}'
+          - Sid: DenyAnyOtherQueueAction
+            Effect: Deny
+            NotAction:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:ChangeMessageVisibility
+            Resource:
+              Ref: ChatQueueArn
+          - Sid: DenyAnyOtherChatObjectAction
+            Effect: Deny
+            NotAction:
+              - s3:GetObject
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: 'arn:${AWS::Partition}:s3:::${ChatBucketName}/inbox/*'
+              - Fn::Sub: 'arn:${AWS::Partition}:s3:::${ChatBucketName}/outbox/*'
+              - Fn::Sub: 'arn:${AWS::Partition}:s3:::${ChatBucketName}/attachments/*'
+
+  CloudflareWorkerUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName:
+        Fn::Sub: '${ProjectName}-cloudflare-worker'
+
+  CloudflareWorkerManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: '${ProjectName}-cloudflare-worker'
+      Users:
+        - Ref: CloudflareWorkerUser
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowQueueSend
+            Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource:
+              Ref: ChatQueueArn
+          - Sid: AllowChatObjectPresignTargets
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: 'arn:${AWS::Partition}:s3:::${ChatBucketName}/inbox/*'
+              - Fn::Sub: 'arn:${AWS::Partition}:s3:::${ChatBucketName}/outbox/*'
+              - Fn::Sub: 'arn:${AWS::Partition}:s3:::${ChatBucketName}/attachments/*'
+          - Sid: DenyBucketLevelS3Actions
+            Effect: Deny
+            Action:
+              - s3:*
+            Resource:
+              Fn::Sub: 'arn:${AWS::Partition}:s3:::${ChatBucketName}'
+          - Sid: DenyAnyOtherQueueAction
+            Effect: Deny
+            NotAction:
+              - sqs:SendMessage
+            Resource:
+              Ref: ChatQueueArn
+          - Sid: DenyAnyOtherChatObjectAction
+            Effect: Deny
+            NotAction:
+              - s3:GetObject
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: 'arn:${AWS::Partition}:s3:::${ChatBucketName}/inbox/*'
+              - Fn::Sub: 'arn:${AWS::Partition}:s3:::${ChatBucketName}/outbox/*'
+              - Fn::Sub: 'arn:${AWS::Partition}:s3:::${ChatBucketName}/attachments/*'
+
+  GitHubActionsOidcRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: '${ProjectName}-github-actions'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowGitHubActionsOidcAssumeRole
+            Effect: Allow
+            Principal:
+              Federated:
+                Ref: GitHubOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub:
+                  Fn::Sub: 'repo:${GitHubRepositoryOwner}/${GitHubRepositoryName}:ref:refs/heads/${GitHubBranchName}'
+
+  GitHubActionsManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: '${ProjectName}-github-actions'
+      Roles:
+        - Ref: GitHubActionsOidcRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowPwaBucketList
+            Effect: Allow
+            Action:
+              - s3:ListBucket
+            Resource:
+              Fn::Sub: 'arn:${AWS::Partition}:s3:::${PwaHostingBucketName}'
+          - Sid: AllowPwaBucketObjectWrites
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource:
+              Fn::Sub: 'arn:${AWS::Partition}:s3:::${PwaHostingBucketName}/*'
+          - Sid: AllowCloudFrontInvalidation
+            Effect: Allow
+            Action:
+              - cloudfront:CreateInvalidation
+            Resource:
+              Fn::Sub: 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistributionId}'
+          - Sid: DenyAnyOtherPwaBucketListAction
+            Effect: Deny
+            NotAction:
+              - s3:ListBucket
+            Resource:
+              Fn::Sub: 'arn:${AWS::Partition}:s3:::${PwaHostingBucketName}'
+          - Sid: DenyAnyOtherPwaBucketObjectAction
+            Effect: Deny
+            NotAction:
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource:
+              Fn::Sub: 'arn:${AWS::Partition}:s3:::${PwaHostingBucketName}/*'
+          - Sid: DenyAnyOtherCloudFrontAction
+            Effect: Deny
+            NotAction:
+              - cloudfront:CreateInvalidation
+            Resource:
+              Fn::Sub: 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistributionId}'
+
+  BillingAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName:
+        Fn::Sub: '${ProjectName}-estimated-charges'
+      AlarmDescription:
+        Fn::Sub: 'Alerts when ${ProjectName} estimated AWS charges exceed $1.00.'
+      Namespace: AWS/Billing
+      MetricName: EstimatedCharges
+      Dimensions:
+        - Name: Currency
+          Value: USD
+      Statistic: Maximum
+      Period: 21600
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: BillingAlarmSnsTopicArn
+
+Outputs:
+  LocalBotUserArn:
+    Description: ARN of the IAM user for the local bot.
+    Value:
+      Fn::GetAtt:
+        - LocalBotUser
+        - Arn
+  LocalBotAccessKeyUserName:
+    Description: IAM user name to use when creating a local bot access key manually.
+    Value:
+      Ref: LocalBotUser
+  LocalBotAccessKeyCreateCommand:
+    Description: Example CLI command to create a local bot access key after stack deployment.
+    Value:
+      Fn::Sub: 'aws iam create-access-key --user-name ${LocalBotUser}'
+  CloudflareWorkerUserArn:
+    Description: ARN of the IAM user for the Cloudflare Worker.
+    Value:
+      Fn::GetAtt:
+        - CloudflareWorkerUser
+        - Arn
+  CloudflareWorkerAccessKeyUserName:
+    Description: IAM user name to use when creating a Cloudflare Worker access key manually.
+    Value:
+      Ref: CloudflareWorkerUser
+  CloudflareWorkerAccessKeyCreateCommand:
+    Description: Example CLI command to create a Cloudflare Worker access key after stack deployment.
+    Value:
+      Fn::Sub: 'aws iam create-access-key --user-name ${CloudflareWorkerUser}'
+  GitHubActionsRoleArn:
+    Description: ARN of the GitHub Actions deployment role.
+    Value:
+      Fn::GetAtt:
+        - GitHubActionsOidcRole
+        - Arn
+  GitHubActionsRoleName:
+    Description: Name of the GitHub Actions deployment role.
+    Value:
+      Ref: GitHubActionsOidcRole
+  BillingAlarmName:
+    Description: Name of the estimated charges billing alarm.
+    Value:
+      Ref: BillingAlarm

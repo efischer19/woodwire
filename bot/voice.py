@@ -97,8 +97,9 @@ class LocalVoicePipeline:
                 ),
             )
             model = self._get_whisper_model()
-            segments, _ = model.transcribe(wav_path)
+            segments, transcription_info = model.transcribe(wav_path)
             transcript_parts: list[str] = []
+            del transcription_info
 
             for segment in segments:
                 segment_text = getattr(segment, "text", "")

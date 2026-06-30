@@ -217,9 +217,12 @@ class WoodwireBot:
 
             return ProcessedPayload(
                 response_audio=self.build_response_audio(
-                    downloaded_attachments,
-                    response_text,
-                    temp_dir,
+                    has_audio_attachment=any(
+                        is_supported_audio_content_type(attachment.content_type)
+                        for attachment in downloaded_attachments
+                    ),
+                    response_text=response_text,
+                    temp_dir=temp_dir,
                     enabled=voice_response_enabled,
                 ),
                 response_text=response_text,
@@ -347,16 +350,12 @@ class WoodwireBot:
 
     def build_response_audio(
         self,
-        attachments: list[DownloadedAttachment],
+        has_audio_attachment: bool,
         response_text: str,
         temp_dir: str | None,
         *,
         enabled: bool,
     ) -> bytes | None:
-        has_audio_attachment = any(
-            is_supported_audio_content_type(attachment.content_type) for attachment in attachments
-        )
-
         if not enabled or not has_audio_attachment or temp_dir is None:
             return None
 

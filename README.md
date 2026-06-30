@@ -120,7 +120,7 @@ To enable it in your new repository:
 
 ### 9. Opting into AWS Deployment
 
-This template includes an optional `.github/workflows/deploy-aws.yml` workflow that deploys `src/` to an AWS S3 bucket and invalidates a CloudFront distribution. It is **disabled by default** — it only runs when triggered manually via `workflow_dispatch`. If you use a build step, update the sync source path in the workflow (see the commented build step instructions inside the file).
+This repository includes a `.github/workflows/deploy-aws.yml` workflow that deploys `src/` to an AWS S3 bucket and invalidates a CloudFront distribution. It runs on manual `workflow_dispatch` and on pushes to `main` when files under `src/` change. If you use a build step later, update the sync source path in the workflow (see the commented build step instructions inside the file).
 
 #### Required AWS Resources
 
@@ -147,18 +147,38 @@ Configure the following in **Settings → Secrets and variables → Actions → 
 #### Enabling the Workflow
 
 1. Provision the AWS resources listed above.
-2. Add the three repository variables listed above in **Settings → Secrets and variables → Actions → Variables**.
+2. Add the four repository variables listed above in **Settings → Secrets and variables → Actions → Variables**.
 3. Go to **Actions → Deploy to AWS (S3 + CloudFront)** and click **Run workflow** to trigger a manual deployment.
-4. (Optional) To deploy automatically on every push to `main`, add a `push` trigger to `.github/workflows/deploy-aws.yml`:
-
-   ```yaml
-   on:
-     push:
-       branches: [main]
-     workflow_dispatch: {}
-   ```
+4. Push a change to `src/` on `main` to use the automatic path-scoped deployment.
 
 > **Note:** The GitHub Pages workflow (`.github/workflows/deploy-pages.yml`) remains the default deployment path and is unaffected by this workflow.
+
+### 10. Opting into Cloudflare Worker Deployment
+
+This repository also includes `.github/workflows/deploy-worker.yml`, a Cloudflare Worker deployment workflow. It runs on manual `workflow_dispatch` and on pushes to `main` when files under `worker/` change. The workflow installs the official `wrangler` CLI with `npm` and deploys with a GitHub Actions secret-backed API token.
+
+#### GitHub Repository Secret
+
+Configure the following in **Settings → Secrets and variables → Actions → Secrets**:
+
+| Secret | Description |
+| :--- | :--- |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API token with permission to deploy the Worker |
+
+#### GitHub Repository Variable
+
+Configure the following in **Settings → Secrets and variables → Actions → Variables**:
+
+| Variable | Description | Example |
+| :--- | :--- | :--- |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account identifier used by `wrangler deploy` | `0123456789abcdef0123456789abcdef` |
+
+#### Enabling the Workflow
+
+1. Add the `CLOUDFLARE_API_TOKEN` secret and `CLOUDFLARE_ACCOUNT_ID` variable.
+2. Scaffold the Worker project under `worker/` with a `wrangler.toml` (or `wrangler.json` / `wrangler.jsonc`) file.
+3. Go to **Actions → Deploy Cloudflare Worker** and click **Run workflow** to trigger a manual deployment.
+4. Push a change to `worker/` on `main` to use the automatic path-scoped deployment.
 
 ## Design Principles
 

@@ -313,13 +313,13 @@ async function appendAssistantReply(conversationId, elements) {
 
 async function drainQueue(elements, state) {
   if (state.isDrainingQueue || !navigator.onLine) {
-    return;
+    return "skipped";
   }
 
   const queue = getQueuedMessages();
   if (!queue.length) {
     updateQueueStatus(elements);
-    return;
+    return "empty";
   }
 
   state.isDrainingQueue = true;
@@ -327,7 +327,9 @@ async function drainQueue(elements, state) {
   for (const message of queue) {
     const sendState = await sendMessage(message, elements, state);
     if (sendState !== "sent") {
-      break;
+      state.isDrainingQueue = false;
+      updateQueueStatus(elements);
+      return sendState;
     }
 
     if (elements.messageHistory.querySelector(`[data-local-id="${message.localId}"]`)) {
@@ -339,6 +341,7 @@ async function drainQueue(elements, state) {
 
   state.isDrainingQueue = false;
   updateQueueStatus(elements);
+  return "sent";
 }
 
 function renderQueuedMessages(elements) {

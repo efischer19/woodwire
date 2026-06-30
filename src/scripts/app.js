@@ -14,6 +14,7 @@ const STORAGE_KEYS = {
 };
 const POLL_INTERVAL_MS = 3000;
 const SERVICE_WORKER_PATH = "sw.js";
+let fallbackMessageCounter = 0;
 
 document.addEventListener("DOMContentLoaded", () => {
   initThemeToggle();
@@ -191,11 +192,13 @@ function announce(elements, message) {
 }
 
 function createLocalMessage(text) {
+  fallbackMessageCounter += 1;
+
   return {
     createdAt: new Date().toISOString(),
     localId:
       globalThis.crypto?.randomUUID?.() ||
-      `local-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      `local-${Date.now()}-${fallbackMessageCounter}`,
     text,
   };
 }

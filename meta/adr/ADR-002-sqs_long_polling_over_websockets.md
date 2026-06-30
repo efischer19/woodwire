@@ -1,6 +1,6 @@
 ---
 title: "ADR-002: Use SQS Long Polling Instead of WebSockets"
-status: "Proposed"
+status: "Accepted"
 date: "2026-06-30"
 tags:
   - "architecture"

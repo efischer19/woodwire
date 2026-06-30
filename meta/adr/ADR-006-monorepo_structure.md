@@ -1,6 +1,6 @@
 ---
 title: "ADR-006: Keep PWA Frontend and Local Bot in a Single Repository"
-status: "Proposed"
+status: "Accepted"
 date: "2026-06-30"
 tags:
   - "architecture"

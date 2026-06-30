@@ -1,6 +1,6 @@
 ---
 title: "ADR-003: Use Direct-to-S3 Pre-signed Uploads for Media"
-status: "Proposed"
+status: "Accepted"
 date: "2026-06-30"
 tags:
   - "architecture"

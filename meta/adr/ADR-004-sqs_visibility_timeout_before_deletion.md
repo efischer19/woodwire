@@ -1,6 +1,6 @@
 ---
 title: "ADR-004: Use SQS Visibility Timeouts Before Message Deletion"
-status: "Proposed"
+status: "Accepted"
 date: "2026-06-30"
 tags:
   - "architecture"

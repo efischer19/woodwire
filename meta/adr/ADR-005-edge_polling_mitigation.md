@@ -1,6 +1,6 @@
 ---
 title: "ADR-005: Poll Cloudflare Worker for Response Status Instead of S3 Directly"
-status: "Proposed"
+status: "Accepted"
 date: "2026-06-30"
 tags:
   - "architecture"

@@ -238,7 +238,7 @@ describe('Woodwire Worker', () => {
     });
   });
 
-  test('generates a presigned upload URL with a scoped S3 key and content type', async () => {
+  test('generates a pre-signed upload URL with a scoped S3 key and content type', async () => {
     const signS3Url = vi.fn().mockResolvedValue('https://uploads.example.com/presigned-put');
     const worker = createWorker({
       createS3Client: () => ({
@@ -342,7 +342,7 @@ describe('Woodwire Worker', () => {
     expect(signS3Url).not.toHaveBeenCalled();
   });
 
-  test('returns a presigned download URL for a completed response object', async () => {
+  test('returns a pre-signed download URL for a completed response object', async () => {
     const signS3Url = vi.fn().mockResolvedValue('https://downloads.example.com/presigned-get');
     const s3Send = vi.fn().mockResolvedValue({
       Contents: [{ Key: 'outbox/conversation-123/1719758400000-response.mp3' }],

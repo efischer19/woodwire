@@ -453,7 +453,7 @@ function validateUploadUrlPayload(body) {
 }
 
 function getUploadSizeBytes(body) {
-  if (!('sizeBytes' in body) || body.sizeBytes === undefined || body.sizeBytes === null) {
+  if (!('sizeBytes' in body) || body.sizeBytes === null) {
     return { value: null };
   }
 

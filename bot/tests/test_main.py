@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import Mock
 
+from bot.ai_backend import MockBackend
 from bot.main import (
     BotConfig,
     INITIAL_BACKOFF_SECONDS,
@@ -54,10 +57,11 @@ class WoodwireBotTests(unittest.TestCase):
             self.config,
             logger=overrides.pop("logger", Mock()),
             now=overrides.pop("now", lambda: self.fixed_now),
-            processor=overrides.pop("processor", lambda payload: f"Echo: {payload['text']}"),
+            ai_backend=overrides.pop("ai_backend", MockBackend()),
             sleep=overrides.pop("sleep", lambda seconds: None),
             s3_client=overrides.pop("s3_client", Mock()),
             sqs_client=overrides.pop("sqs_client", Mock()),
+            temp_root_dir=overrides.pop("temp_root_dir", tempfile.gettempdir()),
             **overrides,
         )
 
@@ -66,12 +70,13 @@ class WoodwireBotTests(unittest.TestCase):
         s3_client = Mock()
         bot = None
 
-        def processor(payload):
-            bot.request_shutdown()
-            return f"Echo: {payload['text']}"
+        class ShutdownBackend(MockBackend):
+            def process(self, _message: str, _attachments: list[str]) -> str:
+                bot.request_shutdown()
+                return "Echo: Hello"
 
         bot = self.create_bot(
-            processor=processor,
+            ai_backend=ShutdownBackend(),
             s3_client=s3_client,
             sqs_client=sqs_client,
         )
@@ -95,29 +100,83 @@ class WoodwireBotTests(unittest.TestCase):
         )
         self.assertEqual(s3_client.put_object.call_count, 2)
 
-    def test_handle_message_writes_processing_marker_and_response(self) -> None:
+    def test_handle_message_downloads_attachments_writes_response_and_cleans_up(self) -> None:
         sqs_client = Mock()
         s3_client = Mock()
-        bot = self.create_bot(s3_client=s3_client, sqs_client=sqs_client)
+        captured_attachments: list[str] = []
+        message_text = "Hello Woodwire"
 
-        response_key = bot.handle_message(build_message("Hello Woodwire"))
+        class RecordingBackend(MockBackend):
+            def process(self, message: str, attachments: list[str]) -> str:
+                test_case.assertEqual(message, message_text)
+                captured_attachments.extend(attachments)
+                return super().process(message, attachments)
 
-        self.assertEqual(response_key, "outbox/conversation-123/1782820800-response.md")
+        test_case = self
+
+        with tempfile.TemporaryDirectory() as temp_root_dir:
+            conversation_temp_dir = os.path.join(
+                temp_root_dir,
+                "woodwire",
+                "conversation-123",
+            )
+
+            def download_file(bucket: str, key: str, filename: str) -> None:
+                self.assertEqual(bucket, self.config.s3_bucket_name)
+                self.assertTrue(filename.startswith(conversation_temp_dir))
+                with open(filename, "w", encoding="utf-8") as handle:
+                    handle.write(key)
+
+            s3_client.download_file.side_effect = download_file
+            bot = self.create_bot(
+                ai_backend=RecordingBackend(),
+                s3_client=s3_client,
+                sqs_client=sqs_client,
+                temp_root_dir=temp_root_dir,
+            )
+
+            response_key = bot.handle_message(
+                build_message(message_text)
+                | {
+                    "Body": json.dumps(
+                        {
+                            "attachments": [
+                                "attachments/conversation-123/a.txt",
+                                "attachments/conversation-123/b.txt",
+                            ],
+                            "conversationId": "conversation-123",
+                            "createdAt": "2026-06-30T12:00:00.000Z",
+                            "text": message_text,
+                        }
+                    )
+                }
+            )
+
+            self.assertEqual(response_key, "outbox/conversation-123/1782820800-response.md")
+            self.assertEqual(captured_attachments, [
+                os.path.join(conversation_temp_dir, "attachment-00-a.txt"),
+                os.path.join(conversation_temp_dir, "attachment-01-b.txt"),
+            ])
+            self.assertFalse(os.path.exists(conversation_temp_dir))
+
         self.assertEqual(s3_client.put_object.call_count, 2)
+        self.assertEqual(s3_client.download_file.call_count, 2)
         marker_call, response_call = s3_client.put_object.call_args_list
         self.assertEqual(marker_call.kwargs["Key"], "outbox/conversation-123/processing.json")
         self.assertEqual(response_call.kwargs["Key"], response_key)
         self.assertEqual(response_call.kwargs["ContentType"], "text/markdown; charset=utf-8")
+        self.assertEqual(response_call.kwargs["Body"], f"Echo: {message_text}".encode("utf-8"))
 
     def test_processing_failure_does_not_delete_message(self) -> None:
         sqs_client = Mock()
         s3_client = Mock()
 
-        def processor(_payload):
-            raise ValueError("processor boom")
+        class FailingBackend:
+            def process(self, _message: str, _attachments: list[str]) -> str:
+                raise ValueError("processor boom")
 
         bot = self.create_bot(
-            processor=processor,
+            ai_backend=FailingBackend(),
             s3_client=s3_client,
             sqs_client=sqs_client,
         )

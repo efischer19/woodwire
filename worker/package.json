@@ -1,0 +1,25 @@
+{
+  "name": "woodwire-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker for the Woodwire edge API.",
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "cloudflare-workers",
+    "woodwire"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1076.0",
+    "@aws-sdk/client-sqs": "^3.1076.0"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.9",
+    "wrangler": "^4.105.0"
+  }
+}

@@ -93,13 +93,12 @@ class LocalVoicePipeline:
                     wav_path,
                 ],
                 unavailable_message=(
-                    "STT engine faster-whisper is unavailable because ffmpeg is not installed"
+                    "STT transcription unavailable: ffmpeg is required for the faster-whisper engine"
                 ),
             )
             model = self._get_whisper_model()
-            segments, transcription_info = model.transcribe(wav_path)
+            segments, _transcription_info = model.transcribe(wav_path)
             transcript_parts: list[str] = []
-            del transcription_info
 
             for segment in segments:
                 segment_text = getattr(segment, "text", "")
@@ -132,7 +131,7 @@ class LocalVoicePipeline:
                     wav_path,
                 ],
                 unavailable_message=(
-                    "TTS engine piper is unavailable because the piper binary is not installed"
+                    "TTS synthesis unavailable: piper executable not found on PATH"
                 ),
                 input=text.encode("utf-8"),
             )

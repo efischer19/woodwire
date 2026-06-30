@@ -15,6 +15,7 @@ from bot.main import (
     MAX_BACKOFF_SECONDS,
     VISIBILITY_TIMEOUT_SECONDS,
     WoodwireBot,
+    combine_message_text,
 )
 from bot.voice import VoiceEngineUnavailableError
 from botocore.exceptions import ClientError
@@ -133,6 +134,7 @@ class WoodwireBotTests(unittest.TestCase):
                 with open(filename, "w", encoding="utf-8") as handle:
                     handle.write(key)
 
+            s3_client.head_object.return_value = {"ContentType": "text/plain"}
             s3_client.download_file.side_effect = download_file
             bot = self.create_bot(
                 ai_backend=RecordingBackend(),
@@ -291,6 +293,29 @@ class WoodwireBotTests(unittest.TestCase):
         self.assertEqual(recorded_messages, ["Fallback text"])
         self.assertEqual(s3_client.put_object.call_count, 2)
         logger.warning.assert_called_once()
+
+    def test_handle_message_rejects_empty_text_without_attachments(self) -> None:
+        sqs_client = Mock()
+        s3_client = Mock()
+        bot = self.create_bot(s3_client=s3_client, sqs_client=sqs_client)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Message payload is missing both text and attachments",
+        ):
+            bot.handle_message(build_message(""))
+
+    def test_combine_message_text_prefers_both_text_and_transcript(self) -> None:
+        self.assertEqual(
+            combine_message_text("Typed note", "Voice note"),
+            "Typed note\n\nVoice memo transcript:\nVoice note",
+        )
+
+    def test_combine_message_text_returns_transcript_when_text_is_empty(self) -> None:
+        self.assertEqual(combine_message_text("", "Voice note"), "Voice note")
+
+    def test_combine_message_text_returns_text_when_transcript_missing(self) -> None:
+        self.assertEqual(combine_message_text("Typed note", None), "Typed note")
 
     def test_processing_failure_does_not_delete_message(self) -> None:
         sqs_client = Mock()

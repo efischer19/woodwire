@@ -305,7 +305,7 @@ class WoodwireBot:
             Key=key,
         )
         content_type = response.get("ContentType", "")
-        return normalize_content_type(content_type) if isinstance(content_type, str) else ""
+        return normalize_content_type(content_type)
 
     def build_backend_message(
         self,

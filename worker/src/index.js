@@ -24,6 +24,7 @@ const STATUS_CACHE_MIN_SECONDS = 2;
 const STATUS_CACHE_MAX_SECONDS = 5;
 const DEFAULT_RATE_LIMIT_REQUESTS = 30;
 const DEFAULT_RATE_LIMIT_WINDOW_SECONDS = 60;
+const MAX_FILENAME_EXTENSION_LENGTH = 16;
 const ALLOWED_CONTENT_TYPE_PREFIXES = ['audio/', 'image/', 'text/'];
 const ALLOWED_CONTENT_TYPES = new Set(['application/pdf']);
 
@@ -366,9 +367,11 @@ function deriveConversationStatus(prefix, objects) {
 function findResponseObjectKey(prefix, objects) {
   const processingKey = `${prefix}${STATUS_PROCESSING_KEY}`;
 
-  return objects
-    .map((object) => object?.Key)
-    .find((key) => typeof key === 'string' && key !== processingKey);
+  const object = objects.find(
+    (entry) => typeof entry?.Key === 'string' && entry.Key !== processingKey,
+  );
+
+  return object?.Key;
 }
 
 async function readJson(request) {
@@ -456,7 +459,10 @@ function isAllowedContentType(contentType) {
 }
 
 function getFilenameExtension(filename) {
-  const match = filename.trim().toLowerCase().match(/\.([a-z0-9]{1,16})$/);
+  const match = filename
+    .trim()
+    .toLowerCase()
+    .match(new RegExp(`\\.([a-z0-9]{1,${MAX_FILENAME_EXTENSION_LENGTH}})$`));
 
   return match ? `.${match[1]}` : '';
 }

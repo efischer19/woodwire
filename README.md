@@ -120,7 +120,7 @@ To enable it in your new repository:
 
 ### 9. Opting into AWS Deployment
 
-This repository includes a `.github/workflows/deploy-aws.yml` workflow that deploys `src/` to an AWS S3 bucket and invalidates a CloudFront distribution. It runs on manual `workflow_dispatch` and on pushes to `main` when files under `src/` change. If you use a build step later, update the sync source path in the workflow (see the commented build step instructions inside the file).
+This repository includes a `.github/workflows/deploy-aws.yml` workflow that deploys `src/` to an AWS S3 bucket and invalidates a CloudFront distribution. It runs on manual `workflow_dispatch` and on pushes to `main` when files under `src/` change. If you add a build step later, update the S3 sync source path in the workflow by following the commented Node/build example in `.github/workflows/deploy-aws.yml`.
 
 #### Required AWS Resources
 
@@ -147,7 +147,7 @@ Configure the following in **Settings → Secrets and variables → Actions → 
 #### Enabling the Workflow
 
 1. Provision the AWS resources listed above.
-2. Add the four repository variables listed above in **Settings → Secrets and variables → Actions → Variables**.
+2. Add the `AWS_ROLE_ARN`, `AWS_REGION`, `S3_BUCKET_NAME`, and `CLOUDFRONT_DISTRIBUTION_ID` repository variables in **Settings → Secrets and variables → Actions → Variables**.
 3. Go to **Actions → Deploy to AWS (S3 + CloudFront)** and click **Run workflow** to trigger a manual deployment.
 4. Push a change to `src/` on `main` to use the automatic path-scoped deployment.
 

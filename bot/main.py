@@ -285,6 +285,11 @@ def main() -> int:
 
     try:
         config = BotConfig.from_env()
+    except ValueError as error:
+        logger.error("%s", error)
+        return 1
+
+    try:
         bot = WoodwireBot(config, logger=logger)
     except ValueError as error:
         logger.error("%s", error)

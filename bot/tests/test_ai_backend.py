@@ -17,8 +17,8 @@ class OpenClawResponse:
     def __enter__(self) -> "OpenClawResponse":
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
-        del exc_type, exc, tb
+    def __exit__(self, _exc_type, _exc, _tb) -> None:
+        return None
 
     def read(self) -> bytes:
         return self.body

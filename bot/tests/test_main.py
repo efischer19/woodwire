@@ -71,8 +71,7 @@ class WoodwireBotTests(unittest.TestCase):
         bot = None
 
         class ShutdownBackend(MockBackend):
-            def process(self, message: str, attachments: list[str]) -> str:
-                del message, attachments
+            def process(self, _message: str, _attachments: list[str]) -> str:
                 bot.request_shutdown()
                 return "Echo: Hello"
 
@@ -172,8 +171,7 @@ class WoodwireBotTests(unittest.TestCase):
         s3_client = Mock()
 
         class FailingBackend:
-            def process(self, message: str, attachments: list[str]) -> str:
-                del message, attachments
+            def process(self, _message: str, _attachments: list[str]) -> str:
                 raise ValueError("processor boom")
 
         bot = self.create_bot(

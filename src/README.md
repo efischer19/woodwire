@@ -9,10 +9,14 @@ step is required — open `index.html` directly in a browser to preview.
 src/
 ├── index.html          # Main HTML entry point
 ├── assets/
-│   ├── styles.css      # Base stylesheet (CSS custom properties, responsive layout)
-│   └── favicon.svg     # Placeholder favicon
+│   ├── styles.css      # Chat shell stylesheet (themes, layout, responsive UI)
+│   ├── favicon.svg     # Browser favicon
+│   ├── icon-192.png    # PWA icon
+│   └── icon-512.png    # PWA icon
 ├── scripts/
-│   └── app.js          # JavaScript entry point (theme toggle, interactive behavior)
+│   └── app.js          # Theme toggle, offline queueing, and chat behavior
+├── manifest.json       # Web app manifest for installability
+├── sw.js               # Service worker for offline app-shell caching
 └── README.md           # This file — documents structure and conventions
 ```
 
@@ -47,7 +51,8 @@ src/
 - **Vanilla ES6+** — No dependencies by default.
 - **Strict mode** — All scripts use `"use strict"`.
 - **Progressive enhancement** — The page works without JavaScript; scripts add
-  interactive enhancements (e.g., dark mode toggle).
+  interactive enhancements such as the dark mode toggle, service worker
+  registration, and offline queue management.
 - **Accessibility** — Interactive elements include proper ARIA attributes and
   keyboard support.
 

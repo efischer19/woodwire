@@ -345,7 +345,7 @@ describe('Woodwire Worker', () => {
   test('returns a presigned download URL for a completed response object', async () => {
     const signS3Url = vi.fn().mockResolvedValue('https://downloads.example.com/presigned-get');
     const s3Send = vi.fn().mockResolvedValue({
-      Contents: [{ Key: 'outbox/conversation-123/1719758400-response.mp3' }],
+      Contents: [{ Key: 'outbox/conversation-123/1719758400000-response.mp3' }],
     });
     const worker = createWorker({
       createS3Client: () => ({
@@ -368,14 +368,14 @@ describe('Woodwire Worker', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       downloadUrl: 'https://downloads.example.com/presigned-get',
-      key: 'outbox/conversation-123/1719758400-response.mp3',
+      key: 'outbox/conversation-123/1719758400000-response.mp3',
     });
     expect(s3Send).toHaveBeenCalledTimes(1);
     expect(signS3Url).toHaveBeenCalledTimes(1);
     expect(signS3Url.mock.calls[0][1]).toBeInstanceOf(GetObjectCommand);
     expect(signS3Url.mock.calls[0][1].input).toEqual({
       Bucket: baseEnv.CHAT_BUCKET_NAME,
-      Key: 'outbox/conversation-123/1719758400-response.mp3',
+      Key: 'outbox/conversation-123/1719758400000-response.mp3',
     });
     expect(signS3Url.mock.calls[0][2]).toEqual({ expiresIn: 900 });
   });

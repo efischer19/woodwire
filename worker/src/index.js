@@ -27,6 +27,9 @@ const DEFAULT_RATE_LIMIT_WINDOW_SECONDS = 60;
 const MAX_FILENAME_EXTENSION_LENGTH = 16;
 const ALLOWED_CONTENT_TYPE_PREFIXES = ['audio/', 'image/', 'text/'];
 const ALLOWED_CONTENT_TYPES = new Set(['application/pdf']);
+const FILENAME_EXTENSION_PATTERN = new RegExp(
+  `\\.([a-z0-9]{1,${MAX_FILENAME_EXTENSION_LENGTH}})$`,
+);
 
 export function createWorker(dependencies = {}) {
   return {
@@ -459,10 +462,7 @@ function isAllowedContentType(contentType) {
 }
 
 function getFilenameExtension(filename) {
-  const match = filename
-    .trim()
-    .toLowerCase()
-    .match(new RegExp(`\\.([a-z0-9]{1,${MAX_FILENAME_EXTENSION_LENGTH}})$`));
+  const match = filename.trim().toLowerCase().match(FILENAME_EXTENSION_PATTERN);
 
   return match ? `.${match[1]}` : '';
 }

@@ -41,6 +41,22 @@ woodwire/
 4. Run the local bot and point it at your queue and storage config.
 5. Deploy `src/` as the static PWA frontend.
 
+### Provision the Chat Bucket
+
+Provision the private chat bucket stack in `infra/woodwire-chat-bucket.yaml`
+before wiring up IAM policies or Worker pre-signed URL generation. The stack
+outputs `ChatBucketName` and `ChatBucketArn` for those downstream
+configurations.
+
+```sh
+aws cloudformation deploy \
+  --stack-name woodwire-chat-bucket \
+  --template-file infra/woodwire-chat-bucket.yaml \
+  --parameter-overrides \
+    ChatBucketName=woodwire-chat-bucket \
+    AllowedCorsOrigin=https://app.example.com
+```
+
 ### Local Quality Checks
 
 ```bash

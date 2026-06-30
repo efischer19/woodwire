@@ -58,6 +58,21 @@ aws cloudformation deploy \
     AllowedCorsOrigin=https://app.example.com
 ```
 
+### Provision the Chat Queue
+
+Provision the primary SQS queue and its dead-letter queue in
+`infra/woodwire-chat-queue.yaml` before deploying IAM policies, the Worker, or
+the local bot. The stack outputs `ChatQueueUrl`, `ChatQueueArn`, and
+`ChatDeadLetterQueueArn` for those downstream configurations.
+
+```sh
+aws cloudformation deploy \
+  --stack-name woodwire-chat-queue \
+  --template-file infra/woodwire-chat-queue.yaml \
+  --parameter-overrides \
+    ChatQueueName=woodwire-chat
+```
+
 ### Local Quality Checks
 
 ```bash

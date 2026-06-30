@@ -1,9 +1,10 @@
 name: Deploy to AWS (S3 + CloudFront)
 
-# This workflow is disabled by default. It is triggered only via manual dispatch.
-# To enable automated deployments on push to main, add a `push` trigger below.
-# See the "Opting into AWS Deployment" section of the README for setup instructions.
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
   workflow_dispatch: {}
 
 permissions:

@@ -52,6 +52,83 @@ npx --yes markdownlint-cli2 "**/*.md"
 npx --yes htmlhint "src/**/*.html"
 ```
 
+### 7. Verify CI
+
+Push a change or open a pull request to confirm the CI workflow runs and passes in your new repository.
+
+### 8. Enable GitHub Pages Deployment
+
+This template includes `.github/workflows/deploy-pages.yml`, which deploys `src/` to GitHub Pages on pushes to `main` and supports manual `workflow_dispatch`.
+
+To enable it in your new repository:
+
+1. Go to **Settings → Pages**
+2. Under **Build and deployment**, set **Source** to **GitHub Actions**
+3. (Optional but recommended) In **Settings → Environments → github-pages**, configure environment protection rules as needed
+4. Push to `main` (or run the **Deploy to GitHub Pages** workflow manually) to publish your site
+
+### 9. Opting into AWS Deployment
+
+This repository includes a `.github/workflows/deploy-aws.yml` workflow that deploys `src/` to an AWS S3 bucket and invalidates a CloudFront distribution. It runs on manual `workflow_dispatch` and on pushes to `main` when files under `src/` change. If you add a build step later, update the S3 sync source path in the workflow by following the commented Node/build example in `.github/workflows/deploy-aws.yml`.
+
+#### Required AWS Resources
+
+Before enabling this workflow, you need the following AWS resources already provisioned (infrastructure setup is out of scope for this template):
+
+| Resource | Description |
+| :--- | :--- |
+| **S3 bucket** | Stores the static site files |
+| **CloudFront distribution** | Serves the site from S3 with HTTPS and caching |
+| **GitHub OIDC identity provider** | Allows GitHub Actions to authenticate with AWS without static keys |
+| **IAM role** | Trusted by the OIDC provider; grants permission to write to S3 and invalidate CloudFront |
+
+#### GitHub Repository Variables
+
+Configure the following in **Settings → Secrets and variables → Actions → Variables**:
+
+| Variable | Description | Example |
+| :--- | :--- | :--- |
+| `AWS_ROLE_ARN` | ARN of the IAM role GitHub Actions will assume via OIDC | `arn:aws:iam::123456789012:role/my-deploy-role` |
+| `AWS_REGION` | AWS region where your resources live (defaults to `us-east-1` if unset) | `us-west-2` |
+| `S3_BUCKET_NAME` | Name of the S3 bucket to sync the site into | `my-project-static-site` |
+| `CLOUDFRONT_DISTRIBUTION_ID` | ID of the CloudFront distribution to invalidate after deploy | `E1ABCDEF2GHIJK` |
+
+#### Enabling the Workflow
+
+1. Provision the AWS resources listed above.
+2. Add the repository variables from the **GitHub Repository Variables** table above in **Settings → Secrets and variables → Actions → Variables**.
+3. Go to **Actions → Deploy to AWS (S3 + CloudFront)** and click **Run workflow** to trigger a manual deployment.
+4. Push a change to `src/` on `main` to use the automatic path-scoped deployment.
+
+> **Note:** The GitHub Pages workflow (`.github/workflows/deploy-pages.yml`) remains the default deployment path and is unaffected by this workflow.
+
+### 10. Opting into Cloudflare Worker Deployment
+
+This repository also includes `.github/workflows/deploy-worker.yml`, a Cloudflare Worker deployment workflow. It runs on manual `workflow_dispatch` and on pushes to `main` when files under `worker/` change. The workflow installs the official `wrangler` CLI with `npm` and deploys with a GitHub Actions secret-backed API token.
+
+#### GitHub Repository Secret
+
+Configure the following in **Settings → Secrets and variables → Actions → Secrets**:
+
+| Secret | Description |
+| :--- | :--- |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API token with permission to deploy the Worker |
+
+#### GitHub Repository Variable
+
+Configure the following in **Settings → Secrets and variables → Actions → Variables**:
+
+| Variable | Description | Example |
+| :--- | :--- | :--- |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account identifier used by `wrangler deploy` | `0123456789abcdef0123456789abcdef` |
+
+#### Enabling the Workflow
+
+1. Add the `CLOUDFLARE_API_TOKEN` secret and `CLOUDFLARE_ACCOUNT_ID` variable.
+2. Scaffold the Worker project under `worker/` with a `wrangler.toml` (or `wrangler.json` / `wrangler.jsonc`) file.
+3. Go to **Actions → Deploy Cloudflare Worker** and click **Run workflow** to trigger a manual deployment.
+4. Push a change to `worker/` on `main` to use the automatic path-scoped deployment.
+
 ## Design Principles
 
 Development standards and contributor expectations are documented in [`meta/DEVELOPMENT_PHILOSOPHY.md`](./meta/DEVELOPMENT_PHILOSOPHY.md).

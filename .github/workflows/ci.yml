@@ -11,6 +11,34 @@ permissions:
   contents: read
 
 jobs:
+  detect-changes:
+    name: Detect source changes
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.frontend.outputs.frontend }}
+    steps:
+      - name: Checkout code
+        if: github.event_name == 'push'
+        uses: actions/checkout@v7
+
+      - name: Detect changed paths
+        if: github.event_name == 'push'
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            frontend:
+              - 'src/**'
+
+      - name: Decide whether frontend lint should run
+        id: frontend
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "frontend=${{ steps.filter.outputs.frontend }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+          fi
+
   quality-checks:
     name: Quality Checks
     runs-on: ubuntu-latest
@@ -25,6 +53,23 @@ jobs:
 
       - name: Run pre-commit hooks
         uses: pre-commit/action@v3.0.1
+
+  html-lint:
+    name: HTML Lint
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Lint HTML files
+        run: npx --yes htmlhint "src/**/*.html"
 
   check-adr-status:
     name: Check ADR Status

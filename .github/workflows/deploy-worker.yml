@@ -1,0 +1,57 @@
+name: Deploy Cloudflare Worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/**'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-worker-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy Worker with Wrangler
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Detect Worker configuration
+        id: worker-config
+        run: |
+          if [ -f worker/wrangler.toml ] || [ -f worker/wrangler.json ] || [ -f worker/wrangler.jsonc ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Cloudflare Worker Deployment"
+              echo
+              echo "Worker source has not been scaffolded yet."
+              echo "Add \`worker/wrangler.toml\` (or JSON config) in the later Worker ticket to enable deployment."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Set up Node.js
+        if: steps.worker-config.outputs.ready == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Wrangler
+        if: steps.worker-config.outputs.ready == 'true'
+        run: npm install --global wrangler
+
+      - name: Deploy Worker
+        if: steps.worker-config.outputs.ready == 'true'
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: wrangler deploy

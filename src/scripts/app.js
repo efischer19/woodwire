@@ -24,6 +24,7 @@ const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 const SERVICE_WORKER_PATH = "sw.js";
 const ATTACHMENT_DOWNLOAD_URLS = new Map();
+const VOICE_MEMO_READY_TEXT = "Voice memo ready.";
 const VOICE_MEMO_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
 let fallbackMessageCounter = 0;
 let fallbackAttachmentCounter = 0;
@@ -1499,9 +1500,9 @@ async function attachVoiceMemo(elements, state) {
 function createVoiceMemoFile(blob, mimeType) {
   const contentType = normalizeAttachmentContentType(mimeType) || "audio/webm";
   const extension = contentType === "audio/mp4" ? "mp4" : "webm";
-  const timestamp = new Date().toISOString().replaceAll(":", "-");
+  const timestampString = new Date().toISOString().replaceAll(":", "-");
 
-  return new File([blob], `voice-memo-${timestamp}.${extension}`, {
+  return new File([blob], `voice-memo-${timestampString}.${extension}`, {
     type: contentType,
   });
 }
@@ -1571,9 +1572,9 @@ function renderVoiceMemoState(elements, state) {
   } else if (elements.voiceMemoAudio.hasAttribute("src")) {
     elements.voiceMemoAudio.removeAttribute("src");
     elements.voiceMemoAudio.load();
-    elements.voiceMemoPreviewSummary.textContent = "Voice memo ready.";
+    elements.voiceMemoPreviewSummary.textContent = VOICE_MEMO_READY_TEXT;
   } else {
-    elements.voiceMemoPreviewSummary.textContent = "Voice memo ready.";
+    elements.voiceMemoPreviewSummary.textContent = VOICE_MEMO_READY_TEXT;
   }
 }
 
@@ -1584,7 +1585,7 @@ function announceVoiceMemo(elements, message) {
 }
 
 function formatElapsedTime(durationMs) {
-  const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
 

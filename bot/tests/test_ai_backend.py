@@ -42,6 +42,10 @@ class AIBackendTests(unittest.TestCase):
 
         self.assertIsInstance(backend, MockBackend)
 
+    def test_build_ai_backend_rejects_invalid_openclaw_port(self) -> None:
+        with self.assertRaisesRegex(ValueError, "OPENCLAW_PORT must be an integer"):
+            build_ai_backend({"OPENCLAW_PORT": "not-a-port"})
+
     def test_openclaw_backend_posts_message_and_attachments(self) -> None:
         request_log: list[SimpleNamespace] = []
 

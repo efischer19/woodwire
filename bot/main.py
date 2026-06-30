@@ -178,7 +178,7 @@ class WoodwireBot:
             return self.ai_backend.process(message_text, attachment_paths)
         finally:
             if temp_dir is not None:
-                shutil.rmtree(temp_dir, ignore_errors=True)
+                self.cleanup_temp_directory(temp_dir)
 
     def write_processing_marker(self, conversation_id: str) -> None:
         key = f"outbox/{conversation_id}/{PROCESSING_MARKER_KEY}"
@@ -211,7 +211,7 @@ class WoodwireBot:
 
         for index, key in enumerate(attachment_keys):
             normalized_key = key.strip()
-            filename = os.path.basename(normalized_key.rstrip("/")) or f"attachment-{index}"
+            filename = build_attachment_filename(normalized_key, index)
             local_path = os.path.join(temp_dir, f"{index:02d}-{filename}")
             self.s3_client.download_file(
                 self.config.s3_bucket_name,
@@ -221,6 +221,12 @@ class WoodwireBot:
             attachment_paths.append(local_path)
 
         return attachment_paths
+
+    def cleanup_temp_directory(self, temp_dir: str) -> None:
+        try:
+            shutil.rmtree(temp_dir)
+        except OSError as error:
+            self.logger.warning("Failed to remove temp directory %s: %s", temp_dir, error)
 
 
 def parse_message_body(body: str) -> dict[str, Any]:
@@ -264,6 +270,15 @@ def read_attachment_keys(payload: dict[str, Any]) -> list[str]:
         normalized_attachments.append(attachment.strip())
 
     return normalized_attachments
+
+
+def build_attachment_filename(key: str, index: int) -> str:
+    filename = os.path.basename(key.rstrip("/"))
+
+    if filename in {"", ".", ".."}:
+        return f"attachment-{index}"
+
+    return filename
 
 
 def configure_logging() -> logging.Logger:

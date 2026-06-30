@@ -104,6 +104,7 @@ class WoodwireBotTests(unittest.TestCase):
         sqs_client = Mock()
         s3_client = Mock()
         captured_attachments: list[str] = []
+        message_text = "Hello Woodwire"
 
         class RecordingBackend(MockBackend):
             def process(self, message: str, attachments: list[str]) -> str:
@@ -135,7 +136,7 @@ class WoodwireBotTests(unittest.TestCase):
             )
 
             response_key = bot.handle_message(
-                build_message("Hello Woodwire")
+                build_message(message_text)
                 | {
                     "Body": json.dumps(
                         {
@@ -145,7 +146,7 @@ class WoodwireBotTests(unittest.TestCase):
                             ],
                             "conversationId": "conversation-123",
                             "createdAt": "2026-06-30T12:00:00.000Z",
-                            "text": "Hello Woodwire",
+                            "text": message_text,
                         }
                     )
                 }
@@ -164,7 +165,7 @@ class WoodwireBotTests(unittest.TestCase):
         self.assertEqual(marker_call.kwargs["Key"], "outbox/conversation-123/processing.json")
         self.assertEqual(response_call.kwargs["Key"], response_key)
         self.assertEqual(response_call.kwargs["ContentType"], "text/markdown; charset=utf-8")
-        self.assertEqual(response_call.kwargs["Body"], b"Echo: Hello Woodwire")
+        self.assertEqual(response_call.kwargs["Body"], f"Echo: {message_text}".encode("utf-8"))
 
     def test_processing_failure_does_not_delete_message(self) -> None:
         sqs_client = Mock()

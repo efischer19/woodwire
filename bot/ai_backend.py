@@ -103,11 +103,19 @@ def build_ai_backend(
 
 def build_openclaw_endpoint(environ: dict[str, str]) -> str:
     host = environ.get("OPENCLAW_HOST", DEFAULT_OPENCLAW_HOST).strip() or DEFAULT_OPENCLAW_HOST
-    port = environ.get("OPENCLAW_PORT", str(DEFAULT_OPENCLAW_PORT)).strip()
+    port_text = environ.get("OPENCLAW_PORT", str(DEFAULT_OPENCLAW_PORT)).strip()
     path = environ.get("OPENCLAW_PATH", DEFAULT_OPENCLAW_PATH).strip() or DEFAULT_OPENCLAW_PATH
 
     if not path.startswith("/"):
         path = f"/{path}"
+
+    try:
+        port = int(port_text)
+    except ValueError as error:
+        raise ValueError("OPENCLAW_PORT must be an integer") from error
+
+    if not 1 <= port <= 65535:
+        raise ValueError("OPENCLAW_PORT must be between 1 and 65535")
 
     return f"http://{host}:{port}{path}"
 

@@ -307,13 +307,13 @@ async function secureEquals(left, right) {
   ]);
   const leftBytes = new Uint8Array(leftDigest);
   const rightBytes = new Uint8Array(rightDigest);
-  let difference = 0;
+  let mismatch = 0;
 
   for (let index = 0; index < leftBytes.length; index += 1) {
-    difference |= leftBytes[index] ^ rightBytes[index];
+    mismatch |= leftBytes[index] ^ rightBytes[index];
   }
 
-  return difference === 0;
+  return mismatch === 0;
 }
 
 function enforceRateLimit(request, env, now) {
@@ -347,13 +347,14 @@ function enforceRateLimit(request, env, now) {
 }
 
 function getClientIp(request) {
-  const forwardedFor = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For');
+  const clientIpHeader =
+    request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For');
 
-  if (!forwardedFor) {
+  if (!clientIpHeader) {
     return 'unknown';
   }
 
-  return forwardedFor.split(',')[0].trim();
+  return clientIpHeader.split(',')[0].trim();
 }
 
 function isValidConversationId(value) {

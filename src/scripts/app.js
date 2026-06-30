@@ -890,13 +890,11 @@ async function appendAssistantReply(conversation, elements) {
   const payload = await response.json();
   const transcript = normalizeAssistantTranscript(payload.transcript);
   const audioUrl = normalizeVoiceResponseAudioUrl(payload.audioUrl);
-  const replyText =
-    transcript || (audioUrl ? VOICE_RESPONSE_NO_TRANSCRIPT_TEXT : "The bot returned an empty reply.");
   appendMessage(elements, {
     author: "AI",
     conversationId: conversation.conversationId,
     responseFor: conversation.conversationId,
-    text: replyText,
+    text: getAssistantReplyText(transcript, audioUrl),
     timestamp: new Date().toISOString(),
     variant: "assistant",
     voiceResponse: audioUrl
@@ -1819,7 +1817,24 @@ function normalizeAssistantTranscript(value) {
 }
 
 function normalizeVoiceResponseAudioUrl(value) {
-  return typeof value === "string" && value.trim() ? value.trim() : "";
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmedValue = value.trim();
+  return trimmedValue || "";
+}
+
+function getAssistantReplyText(transcript, audioUrl) {
+  if (transcript) {
+    return transcript;
+  }
+
+  if (audioUrl) {
+    return VOICE_RESPONSE_NO_TRANSCRIPT_TEXT;
+  }
+
+  return "The bot returned an empty reply.";
 }
 
 function isVoiceAutoplayEnabled() {

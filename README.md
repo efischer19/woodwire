@@ -35,10 +35,8 @@ woodwire/
 
 ## Deploy Your Own (Quickstart)
 
-> This section will be expanded as infrastructure tickets land. Use the plan docs as the source of truth in the meantime.
-
 1. Review architecture and sequencing in [`meta/plans/epic-woodwire/`](./meta/plans/epic-woodwire/).
-2. Provision AWS resources (S3, SQS, IAM) from the infra tickets.
+2. Provision AWS resources (S3, SQS, IAM) from the infra templates and plan docs.
 3. Deploy the Cloudflare Worker with passphrase auth and SQS forwarding.
 4. Run the local bot and point it at your queue and storage config.
 5. Deploy `src/` as the static PWA frontend.
@@ -73,14 +71,40 @@ This repository includes a `.github/workflows/deploy-aws.yml` workflow that depl
 
 #### Required AWS Resources
 
-Before enabling this workflow, you need the following AWS resources already provisioned (infrastructure setup is out of scope for this template):
+Before enabling this workflow, provision the following AWS resources. The IAM
+users, managed policies, GitHub Actions OIDC role, and the $1.00 billing alarm
+can be created with `infra/woodwire-iam.yaml` by deploying the stack in
+`us-east-1`:
+
+```sh
+aws cloudformation deploy \
+  --stack-name woodwire-iam \
+  --template-file infra/woodwire-iam.yaml \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region us-east-1 \
+  --parameter-overrides \
+    ProjectName=woodwire \
+    ChatBucketName=woodwire-chat-bucket \
+    ChatQueueArn=arn:aws:sqs:us-east-1:123456789012:woodwire-chat \
+    PwaHostingBucketName=woodwire-pwa \
+    CloudFrontDistributionId=E1ABCDEF2GHIJK \
+    GitHubRepositoryOwner=efischer19 \
+    GitHubRepositoryName=woodwire \
+    GitHubOidcProviderArn=arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com \
+    BillingAlarmSnsTopicArn=arn:aws:sns:us-east-1:123456789012:woodwire-billing-alerts
+```
+
+After the stack finishes, copy the `GitHubActionsRoleArn` output into the
+`AWS_ROLE_ARN` repository variable. Create long-lived access keys manually for
+the `LocalBotAccessKeyUserName` and `CloudflareWorkerAccessKeyUserName`
+outputs, then store those credentials outside this repository.
 
 | Resource | Description |
 | :--- | :--- |
 | **S3 bucket** | Stores the static site files |
 | **CloudFront distribution** | Serves the site from S3 with HTTPS and caching |
 | **GitHub OIDC identity provider** | Allows GitHub Actions to authenticate with AWS without static keys |
-| **IAM role** | Trusted by the OIDC provider; grants permission to write to S3 and invalidate CloudFront |
+| **IAM role** | Created by `infra/woodwire-iam.yaml`; trusted by the OIDC provider and scoped to S3 deploys plus CloudFront invalidations |
 
 #### GitHub Repository Variables
 

@@ -205,7 +205,7 @@ class WoodwireBot:
             if not message_text and not downloaded_attachments:
                 raise ValueError("Message payload is missing text")
 
-            prompt_text, voice_processing_enabled = self.build_backend_message(
+            prompt_text, voice_response_enabled = self.build_backend_message(
                 message_text,
                 downloaded_attachments,
                 temp_dir,
@@ -220,7 +220,7 @@ class WoodwireBot:
                     downloaded_attachments,
                     response_text,
                     temp_dir,
-                    enabled=voice_processing_enabled,
+                    enabled=voice_response_enabled,
                 ),
                 response_text=response_text,
             )
@@ -311,12 +311,12 @@ class WoodwireBot:
         temp_dir: str | None,
     ) -> tuple[str, bool]:
         transcript = None
-        voice_processing_enabled = bool(temp_dir)
         audio_attachments = [
             attachment
             for attachment in attachments
             if is_supported_audio_content_type(attachment.content_type)
         ]
+        voice_response_enabled = bool(audio_attachments)
 
         if audio_attachments and temp_dir is not None:
             try:
@@ -326,9 +326,9 @@ class WoodwireBot:
                     "%s; continuing with text-only processing",
                     error,
                 )
-                voice_processing_enabled = False
+                voice_response_enabled = False
 
-        return combine_message_text(message_text, transcript), voice_processing_enabled
+        return combine_message_text(message_text, transcript), voice_response_enabled
 
     def transcribe_audio_attachments(
         self,

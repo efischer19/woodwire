@@ -1,0 +1,62 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Standard SQS queue with a dead-letter queue for Woodwire chat events. Deploy
+  with: aws cloudformation deploy --stack-name woodwire-chat-queue
+  --template-file infra/woodwire-chat-queue.yaml --parameter-overrides
+  ChatQueueName=woodwire-chat
+
+# AWS Free Tier context for these queues:
+# - 1 million SQS requests per month (permanent free tier)
+# - Woodwire's expected ~50K monthly requests stay at ~5% of that limit
+# The 20-second long-poll setting minimizes empty receives so the queue remains
+# well inside the free tier during normal use.
+
+Parameters:
+  ChatQueueName:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9_-]{1,76}$'
+    Description: Standard SQS queue name. Limited to 76 chars so the derived -dlq name stays within SQS's 80-character limit.
+
+Resources:
+  ChatDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: '${ChatQueueName}-dlq'
+      SqsManagedSseEnabled: true
+      VisibilityTimeout: 120
+      MessageRetentionPeriod: 604800
+
+  ChatQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Ref: ChatQueueName
+      SqsManagedSseEnabled: true
+      ReceiveMessageWaitTimeSeconds: 20
+      VisibilityTimeout: 120
+      MessageRetentionPeriod: 604800
+      RedrivePolicy:
+        deadLetterTargetArn:
+          Fn::GetAtt:
+            - ChatDeadLetterQueue
+            - Arn
+        maxReceiveCount: 3
+
+Outputs:
+  ChatQueueUrl:
+    Description: URL of the primary SQS queue for the local bot consumer configuration.
+    Value:
+      Ref: ChatQueue
+  ChatQueueArn:
+    Description: ARN of the primary SQS queue for downstream IAM and Worker configuration.
+    Value:
+      Fn::GetAtt:
+        - ChatQueue
+        - Arn
+  ChatDeadLetterQueueArn:
+    Description: ARN of the dead-letter queue for monitoring and IAM policy references.
+    Value:
+      Fn::GetAtt:
+        - ChatDeadLetterQueue
+        - Arn

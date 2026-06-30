@@ -474,7 +474,6 @@ function consumeComposerAttachments(elements, state) {
     createStoredAttachment(attachment, true),
   );
   state.composerAttachments = [];
-  elements.attachmentInput.value = "";
 
   return attachments;
 }

@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Private S3 bucket for Woodwire chat messages and media. Deploy with:
+  aws cloudformation deploy --stack-name woodwire-chat-bucket
+  --template-file infra/woodwire-chat-bucket.yaml --parameter-overrides
+  ChatBucketName=<globally-unique-bucket-name>
+  AllowedCorsOrigin=https://app.example.com
+
+# AWS Free Tier context for this bucket:
+# - 5 GB of S3 Standard storage per month
+# - 2,000 PUT requests per month
+# - 20,000 GET requests per month
+# The 48-hour lifecycle rules below keep inbox/, outbox/, and attachments/
+# storage bounded so ephemeral chat payloads do not accumulate unnecessarily.
+
+Parameters:
+  ChatBucketName:
+    Type: String
+    AllowedPattern: '^[a-z0-9.-]{3,63}$'
+    Description: Globally unique name for the private S3 chat bucket.
+  AllowedCorsOrigin:
+    Type: String
+    AllowedPattern: '^https?://[^/]+$'
+    Description: Origin allowed to upload and fetch pre-signed chat objects.
+
+Resources:
+  ChatBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Ref: ChatBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Suspended
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - Ref: AllowedCorsOrigin
+            AllowedMethods:
+              - PUT
+              - GET
+            AllowedHeaders:
+              - Content-Type
+              - x-amz-content-sha256
+            MaxAge: 3600
+      LifecycleConfiguration:
+        Rules:
+          # S3 lifecycle expiration is configured in whole days; 48 hours = 2 days.
+          - Id: ExpireInboxAfter48Hours
+            Status: Enabled
+            Prefix: inbox/
+            ExpirationInDays: 2
+          - Id: ExpireOutboxAfter48Hours
+            Status: Enabled
+            Prefix: outbox/
+            ExpirationInDays: 2
+          - Id: ExpireAttachmentsAfter48Hours
+            Status: Enabled
+            Prefix: attachments/
+            ExpirationInDays: 2
+
+Outputs:
+  ChatBucketName:
+    Description: Name of the private chat bucket for downstream IAM and Worker configuration.
+    Value:
+      Ref: ChatBucket
+  ChatBucketArn:
+    Description: ARN of the private chat bucket for downstream IAM and Worker configuration.
+    Value:
+      Fn::GetAtt:
+        - ChatBucket
+        - Arn

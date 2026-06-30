@@ -315,7 +315,19 @@ main {
   font-weight: 700;
 }
 
-.setup-form input,
+.checkbox-field {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+  font-weight: 400;
+}
+
+.checkbox-field input {
+  width: auto;
+  margin-top: 0.25rem;
+}
+
+.setup-form input:not([type="checkbox"]),
 .composer textarea {
   width: 100%;
   background-color: var(--color-bg);
@@ -423,6 +435,20 @@ main {
 
 .message-status.is-error {
   color: var(--color-error);
+}
+
+.voice-response {
+  display: grid;
+  gap: var(--spacing-sm);
+}
+
+.voice-response audio {
+  width: min(100%, 20rem);
+}
+
+.voice-response-loading {
+  color: var(--color-text-muted);
+  font-size: 0.9375rem;
 }
 
 .message-meta {

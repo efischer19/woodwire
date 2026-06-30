@@ -29,6 +29,8 @@ const DEFAULT_RATE_LIMIT_WINDOW_SECONDS = 60;
 const ALLOWED_CONTENT_TYPE_PREFIXES = ['audio/', 'image/', 'text/'];
 const ALLOWED_CONTENT_TYPES = new Set(['application/pdf']);
 const FILENAME_EXTENSION_PATTERN = /\.([a-z0-9]{1,16})$/i;
+const AUDIO_RESPONSE_EXTENSION = '.mp3';
+const TRANSCRIPT_RESPONSE_EXTENSION = '.md';
 const DEFAULT_EXTENSION_BY_CONTENT_TYPE = {
   'application/pdf': '.pdf',
   'audio/aac': '.aac',
@@ -231,7 +233,7 @@ async function handleStatusRequest(request, env, context, dependencies) {
     return createResponse(request, env, 502, { error: 'Bad Gateway' });
   }
 
-  const status = deriveConversationStatus(prefix, listResponse.Contents ?? []);
+  const responseFiles = describeResponseFiles(prefix, listResponse.Contents ?? []);
   const response = createResponse(
     request,
     env,
@@ -239,7 +241,9 @@ async function handleStatusRequest(request, env, context, dependencies) {
     {
       cacheTtlSeconds: ttlSeconds,
       conversationId,
-      status,
+      hasAudio: Boolean(responseFiles.audioKey),
+      hasTranscript: Boolean(responseFiles.transcriptKey),
+      status: responseFiles.status,
     },
     {
       'Cache-Control': `max-age=0, s-maxage=${ttlSeconds}`,
@@ -362,24 +366,35 @@ async function handleResponseRequest(request, env, dependencies) {
     return createResponse(request, env, 502, { error: 'Bad Gateway' });
   }
 
-  const key = findResponseObjectKey(prefix, listResponse.Contents ?? []);
+  const responseFiles = describeResponseFiles(prefix, listResponse.Contents ?? []);
 
-  if (!key) {
+  if (!responseFiles.audioKey && !responseFiles.transcriptKey) {
     return createResponse(request, env, 404, { error: 'Response not found' });
   }
 
   try {
-    const downloadUrl = await signS3Command(
-      s3Client,
-      new GetObjectCommand({
-        Bucket: env.CHAT_BUCKET_NAME,
-        Key: key,
-      }),
-      DOWNLOAD_URL_EXPIRY_SECONDS,
-      dependencies,
-    );
+    const [audioUrl, transcript] = await Promise.all([
+      responseFiles.audioKey
+        ? signS3Command(
+            s3Client,
+            new GetObjectCommand({
+              Bucket: env.CHAT_BUCKET_NAME,
+              Key: responseFiles.audioKey,
+            }),
+            DOWNLOAD_URL_EXPIRY_SECONDS,
+            dependencies,
+          )
+        : Promise.resolve(null),
+      responseFiles.transcriptKey
+        ? fetchTranscript(
+            s3Client,
+            env.CHAT_BUCKET_NAME,
+            responseFiles.transcriptKey,
+          )
+        : Promise.resolve(null),
+    ]);
 
-    return createResponse(request, env, 200, { downloadUrl, key });
+    return createResponse(request, env, 200, { audioUrl, transcript });
   } catch {
     return createResponse(request, env, 502, { error: 'Bad Gateway' });
   }
@@ -406,31 +421,87 @@ function validateMessagePayload(body) {
 }
 
 function deriveConversationStatus(prefix, objects) {
+  return describeResponseFiles(prefix, objects).status;
+}
+
+function describeResponseFiles(prefix, objects) {
   const keys = objects
     .map((object) => object?.Key)
     .filter((key) => typeof key === 'string');
   const processingKey = `${prefix}${STATUS_PROCESSING_KEY}`;
-  const hasCompleteObject = keys.some((key) => key !== processingKey);
+  const completedKeys = keys.filter((key) => key !== processingKey);
+  const transcriptKey =
+    completedKeys.find((key) => key.toLowerCase().endsWith(TRANSCRIPT_RESPONSE_EXTENSION)) ?? null;
+  const audioKey =
+    completedKeys.find((key) => key.toLowerCase().endsWith(AUDIO_RESPONSE_EXTENSION)) ?? null;
+  const hasCompleteObject = completedKeys.length > 0;
+  const status = hasCompleteObject ? 'complete' : keys.includes(processingKey) ? 'processing' : 'pending';
 
-  if (hasCompleteObject) {
-    return 'complete';
-  }
-
-  if (keys.includes(processingKey)) {
-    return 'processing';
-  }
-
-  return 'pending';
+  return {
+    audioKey,
+    status,
+    transcriptKey,
+  };
 }
 
-function findResponseObjectKey(prefix, objects) {
-  const processingKey = `${prefix}${STATUS_PROCESSING_KEY}`;
-  // Current bot flows write a single completed object per conversation prefix.
-  const object = objects.find(
-    (entry) => typeof entry?.Key === 'string' && entry.Key !== processingKey,
+async function fetchTranscript(s3Client, bucketName, key) {
+  const response = await s3Client.send(
+    new GetObjectCommand({
+      Bucket: bucketName,
+      Key: key,
+    }),
   );
 
-  return object?.Key;
+  return readResponseBodyAsText(response.Body);
+}
+
+async function readResponseBodyAsText(body) {
+  if (!body) {
+    return '';
+  }
+
+  if (typeof body === 'string') {
+    return body;
+  }
+
+  if (body instanceof Uint8Array) {
+    return new TextDecoder().decode(body);
+  }
+
+  if (typeof body.transformToString === 'function') {
+    return body.transformToString();
+  }
+
+  if (typeof body.text === 'function') {
+    return body.text();
+  }
+
+  if (typeof body[Symbol.asyncIterator] === 'function') {
+    const chunks = [];
+
+    for await (const chunk of body) {
+      chunks.push(
+        typeof chunk === 'string'
+          ? new TextEncoder().encode(chunk)
+          : chunk instanceof Uint8Array
+            ? chunk
+            : new Uint8Array(chunk),
+      );
+    }
+
+    const totalLength = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+    const combined = new Uint8Array(totalLength);
+    let offset = 0;
+
+    for (const chunk of chunks) {
+      combined.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+
+    return new TextDecoder().decode(combined);
+  }
+
+  throw new Error('Unsupported response body');
 }
 
 async function readJson(request) {

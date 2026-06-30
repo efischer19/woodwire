@@ -73,6 +73,21 @@ aws cloudformation deploy \
     ChatQueueName=woodwire-chat
 ```
 
+### Run the Local Bot
+
+The bot defaults to the `openclaw` backend and will POST messages plus local
+attachment paths to `http://127.0.0.1:8080/process` unless you override
+`OPENCLAW_URL` or the `OPENCLAW_HOST` / `OPENCLAW_PORT` / `OPENCLAW_PATH`
+variables.
+
+For a manual end-to-end smoke test without a local LLM, set `AI_BACKEND=mock`
+and run:
+
+```sh
+export AI_BACKEND=mock
+python bot/main.py
+```
+
 ### Local Quality Checks
 
 ```bash

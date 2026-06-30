@@ -3,14 +3,17 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import signal
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
 
 import boto3
+from bot.ai_backend import AIBackend, build_ai_backend
 from botocore.exceptions import BotoCoreError, ClientError
 
 LONG_POLL_WAIT_SECONDS = 20
@@ -18,6 +21,7 @@ VISIBILITY_TIMEOUT_SECONDS = 120
 INITIAL_BACKOFF_SECONDS = 1
 MAX_BACKOFF_SECONDS = 60
 PROCESSING_MARKER_KEY = "processing.json"
+TEMP_DIRECTORY_NAME = "woodwire"
 AWS_OPERATION_ERRORS = (BotoCoreError, ClientError)
 
 
@@ -31,7 +35,7 @@ class BotConfig:
 
     @classmethod
     def from_env(cls, environ: dict[str, str] | None = None) -> "BotConfig":
-        env = environ or os.environ
+        env = os.environ if environ is None else environ
         required_keys = (
             "AWS_ACCESS_KEY_ID",
             "AWS_SECRET_ACCESS_KEY",
@@ -63,14 +67,16 @@ class WoodwireBot:
         s3_client: Any | None = None,
         logger: logging.Logger | None = None,
         now: Callable[[], datetime] | None = None,
-        processor: Callable[[dict[str, Any]], str] | None = None,
+        ai_backend: AIBackend | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        temp_root_dir: str | None = None,
     ) -> None:
         self.config = config
         self.logger = logger or logging.getLogger("woodwire.bot")
         self.now = now or (lambda: datetime.now(timezone.utc))
-        self.processor = processor or build_default_response
+        self.ai_backend = ai_backend or build_ai_backend(logger=self.logger)
         self.sleep = sleep
+        self.temp_root_dir = temp_root_dir or tempfile.gettempdir()
         self.running = True
         self.sqs_client = sqs_client or boto3.client(
             "sqs",
@@ -144,7 +150,10 @@ class WoodwireBot:
         self.logger.info("Processing started for conversation %s", conversation_id)
 
         self.write_processing_marker(conversation_id)
-        response_key = self.write_response(conversation_id, self.processor(payload))
+        response_key = self.write_response(
+            conversation_id,
+            self.process_payload(conversation_id, payload),
+        )
 
         self.sqs_client.delete_message(
             QueueUrl=self.config.sqs_queue_url,
@@ -153,6 +162,23 @@ class WoodwireBot:
         self.logger.info("Response written to s3://%s/%s", self.config.s3_bucket_name, response_key)
         self.logger.info("Message deleted from queue: %s", message_id)
         return response_key
+
+    def process_payload(self, conversation_id: str, payload: dict[str, Any]) -> str:
+        message_text = read_message_text(payload)
+        attachment_keys = read_attachment_keys(payload)
+        temp_dir: str | None = None
+
+        try:
+            if attachment_keys:
+                temp_dir = self.build_temp_directory(conversation_id)
+                attachment_paths = self.download_attachments(temp_dir, attachment_keys)
+            else:
+                attachment_paths = []
+
+            return self.ai_backend.process(message_text, attachment_paths)
+        finally:
+            if temp_dir is not None:
+                shutil.rmtree(temp_dir, ignore_errors=True)
 
     def write_processing_marker(self, conversation_id: str) -> None:
         key = f"outbox/{conversation_id}/{PROCESSING_MARKER_KEY}"
@@ -175,10 +201,21 @@ class WoodwireBot:
         )
         return key
 
+    def build_temp_directory(self, conversation_id: str) -> str:
+        temp_dir = os.path.join(self.temp_root_dir, TEMP_DIRECTORY_NAME, conversation_id)
+        os.makedirs(temp_dir, exist_ok=True)
+        return temp_dir
 
-def build_default_response(payload: dict[str, Any]) -> str:
-    text = str(payload.get("text", "")).strip()
-    return f"# Woodwire Response\n\nEcho: {text}\n"
+    def download_attachments(self, temp_dir: str, attachment_keys: list[str]) -> list[str]:
+        attachment_paths: list[str] = []
+
+        for index, key in enumerate(attachment_keys):
+            filename = os.path.basename(key.rstrip("/")) or f"attachment-{index}"
+            local_path = os.path.join(temp_dir, f"{index:02d}-{filename}")
+            self.s3_client.download_file(self.config.s3_bucket_name, key, local_path)
+            attachment_paths.append(local_path)
+
+        return attachment_paths
 
 
 def parse_message_body(body: str) -> dict[str, Any]:
@@ -197,6 +234,31 @@ def read_conversation_id(payload: dict[str, Any]) -> str:
         raise ValueError("Message payload is missing conversationId")
 
     return conversation_id
+
+
+def read_message_text(payload: dict[str, Any]) -> str:
+    text = payload.get("text")
+
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("Message payload is missing text")
+
+    return text.strip()
+
+
+def read_attachment_keys(payload: dict[str, Any]) -> list[str]:
+    attachments = payload.get("attachments", [])
+
+    if not isinstance(attachments, list):
+        raise ValueError("Message payload attachments must be a list")
+
+    normalized_attachments: list[str] = []
+
+    for attachment in attachments:
+        if not isinstance(attachment, str) or not attachment.strip():
+            raise ValueError("Message payload attachments must be non-empty strings")
+        normalized_attachments.append(attachment.strip())
+
+    return normalized_attachments
 
 
 def configure_logging() -> logging.Logger:
@@ -223,11 +285,11 @@ def main() -> int:
 
     try:
         config = BotConfig.from_env()
+        bot = WoodwireBot(config, logger=logger)
     except ValueError as error:
         logger.error("%s", error)
         return 1
 
-    bot = WoodwireBot(config, logger=logger)
     install_signal_handlers(bot)
     bot.run()
     return 0

@@ -17,10 +17,14 @@ const STORAGE_KEYS = {
 const WORKER_BASE_URL = window.location.origin;
 const WORKER_BASE_ORIGIN = new URL(WORKER_BASE_URL).origin;
 const MAX_STORED_MESSAGES = 200;
+const MAX_ATTACHMENT_COUNT = 5;
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 const SERVICE_WORKER_PATH = "sw.js";
+const ATTACHMENT_DOWNLOAD_URLS = new Map();
 let fallbackMessageCounter = 0;
+let fallbackAttachmentCounter = 0;
 
 document.addEventListener("DOMContentLoaded", () => {
   initThemeToggle();
@@ -34,6 +38,7 @@ function initChatApp() {
   }
 
   const state = {
+    composerAttachments: [],
     isDrainingQueue: false,
     pendingConversations: new Map(
       getPendingConversations().map((conversation) => [conversation.conversationId, conversation]),
@@ -45,9 +50,11 @@ function initChatApp() {
   hydrateSetupForm(elements);
   renderStoredMessages(elements);
   renderQueuedMessages(elements);
+  renderPendingAttachments(elements, state);
   updateConnectivity(elements);
   updateQueueStatus(elements);
   updateConnectionUi(elements);
+  refreshComposerControls(elements, state);
   registerServiceWorker();
 
   elements.setupForm.addEventListener("submit", (event) => {
@@ -67,6 +74,7 @@ function initChatApp() {
       setStorageItem(STORAGE_KEYS.auth, passphrase);
       toggleSetupPanel(elements, false);
       updateConnectionUi(elements);
+      refreshComposerControls(elements, state);
       updateQueueStatus(elements);
       showFlashMessage(elements, "Connection details saved on this device.");
       elements.messageInput.focus();
@@ -84,12 +92,53 @@ function initChatApp() {
     toggleSetupPanel(elements, elements.setupPanel.classList.contains("is-hidden"));
   });
 
+  elements.attachmentButton.addEventListener("click", () => {
+    if (!getStorageItem(STORAGE_KEYS.auth)) {
+      toggleSetupPanel(elements, true);
+      showFlashMessage(elements, "Save your passphrase before adding attachments.", true);
+      elements.passphrase.focus();
+      return;
+    }
+
+    elements.attachmentInput.click();
+  });
+
+  elements.attachmentInput.addEventListener("change", () => {
+    const files = Array.from(elements.attachmentInput.files || []);
+    elements.attachmentInput.value = "";
+
+    if (!files.length) {
+      return;
+    }
+
+    void handleAttachmentSelection(files, elements, state);
+  });
+
+  elements.attachmentPreviews.addEventListener("click", (event) => {
+    const removeButton = event.target.closest("[data-remove-attachment]");
+    if (!removeButton) {
+      return;
+    }
+
+    removeComposerAttachment(removeButton.dataset.removeAttachment, elements, state);
+  });
+
   elements.composer.addEventListener("submit", async (event) => {
     event.preventDefault();
 
     try {
       const text = elements.messageInput.value.trim();
       if (!text) {
+        return;
+      }
+
+      if (state.composerAttachments.some((attachment) => attachment.status === "uploading")) {
+        showFlashMessage(elements, "Wait for attachments to finish uploading before sending.", true);
+        return;
+      }
+
+      if (state.composerAttachments.some((attachment) => attachment.status === "error")) {
+        showFlashMessage(elements, "Remove failed attachments before sending your message.", true);
         return;
       }
 
@@ -100,9 +149,11 @@ function initChatApp() {
         return;
       }
 
-      const localMessage = createLocalMessage(text);
+      const messageAttachments = consumeComposerAttachments(elements, state);
+      const localMessage = createLocalMessage(text, messageAttachments);
       appendMessage(elements, {
         author: "You",
+        attachments: messageAttachments,
         localId: localMessage.localId,
         status: navigator.onLine ? "Sending…" : "Queued for delivery",
         text: localMessage.text,
@@ -111,6 +162,8 @@ function initChatApp() {
       });
 
       elements.messageInput.value = "";
+      renderPendingAttachments(elements, state);
+      refreshComposerControls(elements, state);
 
       if (!navigator.onLine) {
         enqueueMessage(localMessage);
@@ -155,6 +208,10 @@ function initChatApp() {
 
 function getAppElements() {
   return {
+    attachmentButton: document.getElementById("attachment-button"),
+    attachmentInput: document.getElementById("attachment-input"),
+    attachmentPreviews: document.getElementById("attachment-previews"),
+    attachmentStatus: document.getElementById("attachment-status"),
     composer: document.getElementById("composer"),
     connectionSettings: document.getElementById("connection-settings"),
     flashMessage: document.getElementById("flash-message"),
@@ -179,11 +236,349 @@ function hydrateSetupForm(elements) {
 
 function updateConnectionUi(elements) {
   const hasAuth = Boolean(getStorageItem(STORAGE_KEYS.auth));
+  elements.attachmentButton.disabled = !hasAuth;
+  elements.attachmentInput.disabled = !hasAuth;
   elements.messageInput.disabled = !hasAuth;
   elements.sendButton.disabled = !hasAuth;
   elements.connectionSettings.textContent = hasAuth
     ? "Update connection"
     : "Connection settings";
+}
+
+function refreshComposerControls(elements, state) {
+  const hasAuth = Boolean(getStorageItem(STORAGE_KEYS.auth));
+  const hasUploadingAttachment = state.composerAttachments.some(
+    (attachment) => attachment.status === "uploading",
+  );
+  const canAddMoreAttachments = state.composerAttachments.length < MAX_ATTACHMENT_COUNT;
+
+  elements.attachmentButton.disabled = !hasAuth || !canAddMoreAttachments;
+  elements.attachmentInput.disabled = !hasAuth || !canAddMoreAttachments;
+  elements.sendButton.disabled = !hasAuth || hasUploadingAttachment;
+}
+
+async function handleAttachmentSelection(files, elements, state) {
+  const remainingSlots = MAX_ATTACHMENT_COUNT - state.composerAttachments.length;
+
+  if (remainingSlots <= 0) {
+    showFlashMessage(
+      elements,
+      `You can attach up to ${MAX_ATTACHMENT_COUNT} files per message.`,
+      true,
+    );
+    return;
+  }
+
+  if (files.length > remainingSlots) {
+    showFlashMessage(
+      elements,
+      `Only ${remainingSlots} more attachment${remainingSlots === 1 ? "" : "s"} can be added.`,
+      true,
+    );
+  }
+
+  for (const file of files.slice(0, remainingSlots)) {
+    const validationError = validateAttachmentFile(file);
+
+    if (validationError) {
+      showFlashMessage(elements, validationError, true);
+      continue;
+    }
+
+    startAttachmentUpload(file, elements, state);
+  }
+}
+
+function validateAttachmentFile(file) {
+  if (!file?.type || !isAllowedAttachmentContentType(file.type)) {
+    return `${file?.name || "This file"} is not a supported image, PDF, or text file.`;
+  }
+
+  if (file.size > MAX_ATTACHMENT_BYTES) {
+    return `${file.name} is larger than 25 MB. Choose a smaller file.`;
+  }
+
+  return null;
+}
+
+function isAllowedAttachmentContentType(contentType) {
+  const normalized = normalizeAttachmentContentType(contentType);
+
+  return (
+    normalized === "application/pdf" ||
+    normalized.startsWith("image/") ||
+    normalized.startsWith("text/")
+  );
+}
+
+function normalizeAttachmentContentType(contentType) {
+  return String(contentType || "")
+    .split(";", 1)[0]
+    .trim()
+    .toLowerCase();
+}
+
+function startAttachmentUpload(file, elements, state) {
+  fallbackAttachmentCounter += 1;
+
+  const attachment = {
+    contentType: normalizeAttachmentContentType(file.type),
+    id:
+      globalThis.crypto?.randomUUID?.() ||
+      `attachment-${Date.now()}-${fallbackAttachmentCounter}-${Math.random().toString(16).slice(2)}`,
+    key: "",
+    name: file.name,
+    previewUrl: null,
+    progress: 0,
+    sizeBytes: file.size,
+    status: "uploading",
+    cancelUpload: null,
+  };
+
+  state.composerAttachments.push(attachment);
+  renderPendingAttachments(elements, state);
+  refreshComposerControls(elements, state);
+  announce(elements, `Uploading ${attachment.name}.`);
+
+  const previewPromise = createAttachmentPreview(file, attachment.contentType);
+
+  void (async () => {
+    try {
+      const { key, uploadUrl } = await requestUploadReservation(file);
+      attachment.key = key;
+      attachment.previewUrl = await previewPromise.catch(() => null);
+      await uploadAttachmentFile(uploadUrl, file, (progress) => {
+        attachment.progress = progress;
+        renderPendingAttachments(elements, state);
+      }, attachment);
+
+      if (!state.composerAttachments.some((item) => item.id === attachment.id)) {
+        return;
+      }
+
+      attachment.progress = 100;
+      attachment.status = "uploaded";
+      renderPendingAttachments(elements, state);
+      refreshComposerControls(elements, state);
+      announce(elements, `${attachment.name} uploaded.`);
+    } catch (error) {
+      if (!state.composerAttachments.some((item) => item.id === attachment.id)) {
+        return;
+      }
+
+      if (error?.aborted) {
+        return;
+      }
+
+      attachment.status = "error";
+      renderPendingAttachments(elements, state);
+      refreshComposerControls(elements, state);
+
+      if (error.status === 401) {
+        handleAuthenticationFailure(elements, state);
+        return;
+      }
+
+      showFlashMessage(elements, getAttachmentErrorMessage(attachment.name, error), true);
+    }
+  })();
+}
+
+async function requestUploadReservation(file) {
+  const response = await workerFetch("/api/upload-url", {
+    body: JSON.stringify({
+      contentType: normalizeAttachmentContentType(file.type),
+      filename: file.name,
+      sizeBytes: file.size,
+    }),
+    headers: {
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw await createResponseError(response);
+  }
+
+  return response.json();
+}
+
+function uploadAttachmentFile(uploadUrl, file, onProgress, attachment) {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    attachment.cancelUpload = () => request.abort();
+    request.open("PUT", uploadUrl);
+    request.setRequestHeader("Content-Type", normalizeAttachmentContentType(file.type));
+    request.upload.addEventListener("progress", (event) => {
+      if (!event.lengthComputable) {
+        return;
+      }
+
+      // Keep 100% reserved for a confirmed server response so the UI does not
+      // imply success before S3 accepts the upload.
+      onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
+    });
+    request.addEventListener("load", () => {
+      attachment.cancelUpload = null;
+
+      if (request.status >= 200 && request.status < 300) {
+        resolve();
+        return;
+      }
+
+      reject(new Error(`Upload failed with status ${request.status}.`));
+    });
+    request.addEventListener("error", () => {
+      attachment.cancelUpload = null;
+      reject(new Error("Upload failed. Check your connection and try again."));
+    });
+    request.addEventListener("abort", () => {
+      attachment.cancelUpload = null;
+      reject(Object.assign(new Error("Upload aborted"), { aborted: true }));
+    });
+    request.send(file);
+  });
+}
+
+function createAttachmentPreview(file, contentType) {
+  if (!contentType.startsWith("image/")) {
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(typeof reader.result === "string" ? reader.result : null));
+    reader.addEventListener("error", () => reject(new Error("The image preview could not be generated.")));
+    reader.readAsDataURL(file);
+  });
+}
+
+function removeComposerAttachment(attachmentId, elements, state) {
+  const attachmentIndex = state.composerAttachments.findIndex(
+    (attachment) => attachment.id === attachmentId,
+  );
+
+  if (attachmentIndex < 0) {
+    return;
+  }
+
+  const [attachment] = state.composerAttachments.splice(attachmentIndex, 1);
+  attachment.cancelUpload?.();
+
+  renderPendingAttachments(elements, state);
+  refreshComposerControls(elements, state);
+  announce(elements, `${attachment.name} removed.`);
+}
+
+function consumeComposerAttachments(elements, state) {
+  const attachments = state.composerAttachments.map((attachment) =>
+    createStoredAttachment(attachment, true),
+  );
+  state.composerAttachments = [];
+
+  return attachments;
+}
+
+function renderPendingAttachments(elements, state) {
+  const attachments = state.composerAttachments;
+  elements.attachmentPreviews.innerHTML = "";
+  elements.attachmentPreviews.classList.toggle("is-hidden", attachments.length === 0);
+
+  for (const attachment of attachments) {
+    const article = document.createElement("article");
+    article.className = "attachment-preview";
+    article.dataset.attachmentId = attachment.id;
+
+    const header = document.createElement("div");
+    header.className = "attachment-preview-header";
+
+    const details = document.createElement("div");
+    details.className = "attachment-preview-details";
+
+    const name = document.createElement("p");
+    name.className = "attachment-preview-name";
+    name.textContent = attachment.name;
+
+    const meta = document.createElement("p");
+    meta.className = "attachment-preview-meta";
+    meta.textContent = `${formatAttachmentSize(attachment.sizeBytes)} · ${getAttachmentStatusText(attachment)}`;
+
+    details.append(name, meta);
+
+    const removeButton = document.createElement("button");
+    removeButton.className = "secondary-button attachment-remove-button";
+    removeButton.dataset.removeAttachment = attachment.id;
+    removeButton.type = "button";
+    removeButton.textContent = "Remove";
+
+    header.append(details, removeButton);
+    article.append(header);
+
+    if (attachment.previewUrl) {
+      const preview = document.createElement("img");
+      preview.alt = `Preview of ${attachment.name}`;
+      preview.className = "attachment-preview-image";
+      preview.src = attachment.previewUrl;
+      article.append(preview);
+    }
+
+    const status = document.createElement("p");
+    status.className = "attachment-preview-status";
+    status.textContent = getAttachmentStatusText(attachment);
+    status.classList.toggle("is-error", attachment.status === "error");
+    article.append(status);
+    elements.attachmentPreviews.append(article);
+  }
+
+  elements.attachmentStatus.textContent = getAttachmentSummary(attachments);
+}
+
+function getAttachmentStatusText(attachment) {
+  if (attachment.status === "error") {
+    return "Upload failed";
+  }
+
+  if (attachment.status === "uploaded") {
+    return "Uploaded";
+  }
+
+  return `Uploading… ${attachment.progress}%`;
+}
+
+function getAttachmentSummary(attachments) {
+  if (!attachments.length) {
+    return "";
+  }
+
+  const uploadingCount = attachments.filter((attachment) => attachment.status === "uploading").length;
+  const readyCount = attachments.filter((attachment) => attachment.status === "uploaded").length;
+
+  if (uploadingCount > 0) {
+    return `${readyCount} ready, ${uploadingCount} uploading.`;
+  }
+
+  return `${readyCount} attachment${readyCount === 1 ? "" : "s"} ready to send.`;
+}
+
+function getAttachmentErrorMessage(name, error) {
+  if (error instanceof Error && error.message) {
+    return `${name} could not be uploaded. ${error.message}`;
+  }
+
+  return `${name} could not be uploaded.`;
+}
+
+function formatAttachmentSize(sizeBytes) {
+  if (sizeBytes >= 1024 * 1024) {
+    return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  if (sizeBytes >= 1024) {
+    return `${Math.round(sizeBytes / 1024)} KB`;
+  }
+
+  return `${sizeBytes} B`;
 }
 
 function toggleSetupPanel(elements, shouldShow) {
@@ -206,10 +601,11 @@ function announce(elements, message) {
   elements.screenReaderStatus.textContent = message;
 }
 
-function createLocalMessage(text) {
+function createLocalMessage(text, attachments = []) {
   fallbackMessageCounter += 1;
 
   return {
+    attachments: serializeStoredAttachments(attachments),
     createdAt: new Date().toISOString(),
     localId:
       globalThis.crypto?.randomUUID?.() ||
@@ -222,7 +618,7 @@ async function sendMessage(message, elements, state) {
   try {
     const response = await workerFetch("/api/message", {
       body: JSON.stringify({
-        attachments: [],
+        attachments: message.attachments.map((attachment) => attachment.key),
         text: message.text,
       }),
       headers: {
@@ -485,6 +881,7 @@ function renderQueuedMessages(elements) {
 
     appendMessage(elements, {
       author: "You",
+      attachments: message.attachments,
       localId: message.localId,
       status: "Queued for delivery",
       text: message.text,
@@ -508,6 +905,7 @@ function renderStoredMessages(elements) {
       elements,
       {
         author: message.role === "ai" ? "AI" : "You",
+        attachments: normalizeStoredAttachments(message.attachments),
         conversationId: message.conversationId,
         localId: message.role === "user" ? message.id : undefined,
         responseFor: message.role === "ai" ? message.conversationId || message.id : undefined,
@@ -539,6 +937,10 @@ function appendMessage(elements, message, options = {}) {
   const text = document.createElement("p");
   text.textContent = message.text;
   body.append(text);
+
+  if (Array.isArray(message.attachments) && message.attachments.length) {
+    body.append(createMessageAttachments(elements, message.attachments));
+  }
 
   if (message.status) {
     const status = document.createElement("p");
@@ -638,6 +1040,7 @@ function setStoredMessages(messages) {
 
 function upsertStoredMessage(message) {
   const storedMessage = {
+    attachments: serializeStoredAttachments(message.attachments),
     conversationId: message.conversationId || message.responseFor || null,
     id: message.variant === "assistant" ? message.responseFor : message.localId,
     role: message.variant === "assistant" ? "ai" : "user",
@@ -661,6 +1064,147 @@ function updateStoredMessageStatus(localId, statusText) {
   );
 
   setStoredMessages(messages);
+}
+
+function createStoredAttachment(attachment, includeLocalUrls = false) {
+  return {
+    contentType: attachment.contentType,
+    key: attachment.key,
+    linkUrl: includeLocalUrls ? attachment.linkUrl || null : null,
+    name: attachment.name,
+    previewUrl: includeLocalUrls ? attachment.previewUrl || null : null,
+  };
+}
+
+function serializeStoredAttachments(attachments = []) {
+  return attachments.map((attachment) => createStoredAttachment(attachment, false));
+}
+
+function normalizeStoredAttachments(attachments = []) {
+  if (!Array.isArray(attachments)) {
+    return [];
+  }
+
+  return attachments
+    .filter((attachment) => attachment && typeof attachment === "object")
+    .map((attachment) => ({
+      contentType: attachment.contentType || "",
+      key: attachment.key || "",
+      linkUrl: attachment.linkUrl || null,
+      name: getAttachmentDisplayName(attachment),
+      previewUrl: attachment.previewUrl || null,
+    }))
+    .filter((attachment) => attachment.key || attachment.linkUrl || attachment.previewUrl);
+}
+
+function getAttachmentDisplayName(attachment) {
+  return attachment.name || attachment.key || "Attachment";
+}
+
+function createMessageAttachments(elements, attachments) {
+  const list = document.createElement("ul");
+  list.className = "message-attachments";
+
+  for (const attachment of attachments.map((item) => createStoredAttachment(item, true))) {
+    const item = document.createElement("li");
+    const name = getAttachmentDisplayName(attachment);
+    const imageUrl = attachment.previewUrl || null;
+    const linkUrl = attachment.linkUrl || null;
+
+    if (attachment.contentType.startsWith("image/")) {
+      const link = document.createElement("a");
+      link.className = "message-attachment-link";
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+
+      const image = document.createElement("img");
+      image.alt = `Preview of ${name}`;
+      image.className = "message-attachment-image";
+      image.hidden = !imageUrl;
+
+      const label = document.createElement("span");
+      label.textContent = name;
+
+      if (imageUrl) {
+        image.src = imageUrl;
+      }
+
+      if (linkUrl) {
+        link.href = linkUrl;
+      }
+
+      link.append(image, label);
+      item.append(link);
+
+      if (!imageUrl && attachment.key) {
+        void hydrateAttachmentLink(elements, attachment.key, link, image);
+      }
+    } else if (linkUrl) {
+      const link = document.createElement("a");
+      link.className = "message-attachment-link";
+      link.href = linkUrl;
+      link.rel = "noopener noreferrer";
+      link.target = "_blank";
+      link.textContent = name;
+      item.append(link);
+    } else {
+      const label = document.createElement("span");
+      label.className = "message-attachment-name";
+      label.textContent = name;
+      item.append(label);
+
+      if (attachment.key) {
+        void hydrateAttachmentLink(elements, attachment.key, label);
+      }
+    }
+
+    list.append(item);
+  }
+
+  return list;
+}
+
+async function hydrateAttachmentLink(elements, key, target, imageElement) {
+  try {
+    const downloadUrl = await getAttachmentDownloadUrl(key);
+
+    if (target.tagName.toUpperCase() === "A") {
+      target.href = downloadUrl;
+    } else {
+      const link = document.createElement("a");
+      link.className = "message-attachment-link";
+      link.href = downloadUrl;
+      link.rel = "noopener noreferrer";
+      link.target = "_blank";
+      link.textContent = target.textContent;
+      target.replaceWith(link);
+    }
+
+    if (imageElement) {
+      imageElement.src = downloadUrl;
+      imageElement.hidden = false;
+    }
+  } catch {
+    announce(elements, "An attachment preview could not be loaded.");
+  }
+}
+
+async function getAttachmentDownloadUrl(key) {
+  if (ATTACHMENT_DOWNLOAD_URLS.has(key)) {
+    return ATTACHMENT_DOWNLOAD_URLS.get(key);
+  }
+
+  const response = await workerFetch(`/api/attachment?key=${encodeURIComponent(key)}`, {
+    method: "GET",
+  });
+
+  if (!response.ok) {
+    throw await createResponseError(response);
+  }
+
+  const payload = await response.json();
+  ATTACHMENT_DOWNLOAD_URLS.set(key, payload.downloadUrl);
+  return payload.downloadUrl;
 }
 
 function getPendingConversations() {
@@ -771,6 +1315,7 @@ function handleAuthenticationFailure(elements, state, localId) {
   elements.passphrase.value = "";
   toggleSetupPanel(elements, true);
   updateConnectionUi(elements);
+  refreshComposerControls(elements, state);
   updateQueueStatus(elements);
   showFlashMessage(elements, "Authentication failed. Please re-enter your passphrase.", true);
 

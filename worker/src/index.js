@@ -113,6 +113,14 @@ export async function handleRequest(request, env, context = {}, dependencies = {
     return handleUploadUrlRequest(request, env, dependencies);
   }
 
+  if (url.pathname === '/api/attachment') {
+    if (request.method !== 'GET') {
+      return methodNotAllowed(request, env, 'GET, OPTIONS');
+    }
+
+    return handleAttachmentRequest(request, env, dependencies);
+  }
+
   if (url.pathname.startsWith('/api/status/')) {
     if (request.method !== 'GET') {
       return methodNotAllowed(request, env, 'GET, OPTIONS');
@@ -291,6 +299,36 @@ async function handleUploadUrlRequest(request, env, dependencies) {
     );
 
     return createResponse(request, env, 200, { key, uploadUrl });
+  } catch {
+    return createResponse(request, env, 502, { error: 'Bad Gateway' });
+  }
+}
+
+async function handleAttachmentRequest(request, env, dependencies) {
+  const key = new URL(request.url).searchParams.get('key') ?? '';
+
+  if (!isValidAttachmentKey(key)) {
+    return createResponse(request, env, 400, { error: 'Invalid attachment key' });
+  }
+
+  if (!env.CHAT_BUCKET_NAME) {
+    return createResponse(request, env, 500, { error: 'Internal Server Error' });
+  }
+
+  const s3Client = createS3Client(env, dependencies);
+
+  try {
+    const downloadUrl = await signS3Command(
+      s3Client,
+      new GetObjectCommand({
+        Bucket: env.CHAT_BUCKET_NAME,
+        Key: key,
+      }),
+      DOWNLOAD_URL_EXPIRY_SECONDS,
+      dependencies,
+    );
+
+    return createResponse(request, env, 200, { downloadUrl, key });
   } catch {
     return createResponse(request, env, 502, { error: 'Bad Gateway' });
   }
@@ -554,6 +592,15 @@ function getClientIp(request) {
 
 function isValidConversationId(value) {
   return /^[A-Za-z0-9_-]{1,128}$/.test(value);
+}
+
+function isValidAttachmentKey(value) {
+  if (!/^attachments\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9._-]{1,256}$/.test(value)) {
+    return false;
+  }
+
+  const filename = value.split('/').pop() ?? '';
+  return !filename.includes('..');
 }
 
 function getStatusCacheTtl(env) {

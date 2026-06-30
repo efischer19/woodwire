@@ -212,7 +212,7 @@ class WoodwireBot:
         for index, key in enumerate(attachment_keys):
             normalized_key = key.strip()
             filename = build_attachment_filename(normalized_key, index)
-            local_path = os.path.join(temp_dir, f"{index:02d}-{filename}")
+            local_path = os.path.join(temp_dir, f"attachment-{index:02d}-{filename}")
             self.s3_client.download_file(
                 self.config.s3_bucket_name,
                 normalized_key,

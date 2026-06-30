@@ -19,8 +19,7 @@ class AIBackend(Protocol):
 
 
 class MockBackend:
-    def process(self, message: str, attachments: list[str]) -> str:
-        del attachments
+    def process(self, message: str, _attachments: list[str]) -> str:
         return f"Echo: {message}"
 
 

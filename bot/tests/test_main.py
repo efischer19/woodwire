@@ -108,7 +108,7 @@ class WoodwireBotTests(unittest.TestCase):
 
         class RecordingBackend(MockBackend):
             def process(self, message: str, attachments: list[str]) -> str:
-                test_case.assertEqual(message, "Hello Woodwire")
+                test_case.assertEqual(message, message_text)
                 captured_attachments.extend(attachments)
                 return super().process(message, attachments)
 
@@ -154,8 +154,8 @@ class WoodwireBotTests(unittest.TestCase):
 
             self.assertEqual(response_key, "outbox/conversation-123/1782820800-response.md")
             self.assertEqual(captured_attachments, [
-                os.path.join(conversation_temp_dir, "00-a.txt"),
-                os.path.join(conversation_temp_dir, "01-b.txt"),
+                os.path.join(conversation_temp_dir, "attachment-00-a.txt"),
+                os.path.join(conversation_temp_dir, "attachment-01-b.txt"),
             ])
             self.assertFalse(os.path.exists(conversation_temp_dir))
 

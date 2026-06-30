@@ -595,7 +595,12 @@ function isValidConversationId(value) {
 }
 
 function isValidAttachmentKey(value) {
-  return /^attachments\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9._-]{1,256}$/.test(value);
+  if (!/^attachments\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9._-]{1,256}$/.test(value)) {
+    return false;
+  }
+
+  const filename = value.split('/').pop() ?? '';
+  return !filename.includes('..');
 }
 
 function getStatusCacheTtl(env) {

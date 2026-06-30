@@ -325,7 +325,7 @@ function startAttachmentUpload(file, elements, state) {
     contentType: normalizeAttachmentContentType(file.type),
     id:
       globalThis.crypto?.randomUUID?.() ||
-      `attachment-${Date.now()}-${fallbackAttachmentCounter}`,
+      `attachment-${Date.now()}-${fallbackAttachmentCounter}-${Math.random().toString(16).slice(2)}`,
     key: "",
     name: file.name,
     previewUrl: null,
@@ -1168,7 +1168,7 @@ async function hydrateAttachmentLink(elements, key, target, imageElement) {
   try {
     const downloadUrl = await getAttachmentDownloadUrl(key);
 
-    if (target.tagName === "A") {
+    if (target.tagName.toUpperCase() === "A") {
       target.href = downloadUrl;
     } else {
       const link = document.createElement("a");

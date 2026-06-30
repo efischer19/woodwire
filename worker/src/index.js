@@ -16,7 +16,9 @@ const SECURITY_HEADERS = {
 };
 const RATE_LIMIT_STORE = new Map();
 const STATUS_PROCESSING_KEY = 'processing.json';
+// Upload URLs are short-lived because they are intended for immediate, single-object PUTs.
 const UPLOAD_URL_EXPIRY_SECONDS = 5 * 60;
+// Download URLs allow a slightly longer window to accommodate slower client downloads.
 const DOWNLOAD_URL_EXPIRY_SECONDS = 15 * 60;
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const STATUS_CACHE_TTL_SECONDS = 3;
@@ -24,13 +26,9 @@ const STATUS_CACHE_MIN_SECONDS = 2;
 const STATUS_CACHE_MAX_SECONDS = 5;
 const DEFAULT_RATE_LIMIT_REQUESTS = 30;
 const DEFAULT_RATE_LIMIT_WINDOW_SECONDS = 60;
-const MAX_FILENAME_EXTENSION_LENGTH = 16;
 const ALLOWED_CONTENT_TYPE_PREFIXES = ['audio/', 'image/', 'text/'];
 const ALLOWED_CONTENT_TYPES = new Set(['application/pdf']);
-const FILENAME_EXTENSION_PATTERN = new RegExp(
-  `\\.([a-z0-9]{1,${MAX_FILENAME_EXTENSION_LENGTH}})$`,
-  'i',
-);
+const FILENAME_EXTENSION_PATTERN = /\.([a-z0-9]{1,16})$/i;
 const DEFAULT_EXTENSION_BY_CONTENT_TYPE = {
   'application/pdf': '.pdf',
   'audio/aac': '.aac',
@@ -389,7 +387,7 @@ function deriveConversationStatus(prefix, objects) {
 
 function findResponseObjectKey(prefix, objects) {
   const processingKey = `${prefix}${STATUS_PROCESSING_KEY}`;
-
+  // Current bot flows write a single completed object per conversation prefix.
   const object = objects.find(
     (entry) => typeof entry?.Key === 'string' && entry.Key !== processingKey,
   );
@@ -454,14 +452,14 @@ function validateUploadUrlPayload(body) {
 
 function getUploadSizeBytes(body) {
   if (!('sizeBytes' in body) || body.sizeBytes === null) {
-    return { value: null };
+    return { error: null, value: null };
   }
 
   if (!Number.isInteger(body.sizeBytes) || body.sizeBytes < 0) {
-    return { error: 'Field "sizeBytes" must be a non-negative integer' };
+    return { error: 'Field "sizeBytes" must be a non-negative integer', value: null };
   }
 
-  return { value: body.sizeBytes };
+  return { error: null, value: body.sizeBytes };
 }
 
 function normalizeContentType(contentType) {

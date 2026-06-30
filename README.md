@@ -88,7 +88,7 @@ aws cloudformation deploy \
     ChatQueueArn=arn:aws:sqs:us-east-1:123456789012:woodwire-chat \
     PwaHostingBucketName=woodwire-pwa \
     CloudFrontDistributionId=E1ABCDEF2GHIJK \
-    GitHubRepositoryOwner=efischer19 \
+    GitHubRepositoryOwner=YOUR_GITHUB_USERNAME \
     GitHubRepositoryName=woodwire \
     GitHubOidcProviderArn=arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com \
     BillingAlarmSnsTopicArn=arn:aws:sns:us-east-1:123456789012:woodwire-billing-alerts

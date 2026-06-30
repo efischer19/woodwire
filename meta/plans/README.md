@@ -1,6 +1,6 @@
 # Plans Directory
 
-This directory contains planning documents, roadmaps, and implementation plans for the `{{PROJECT_NAME}}` project.
+This directory contains planning documents, roadmaps, and implementation plans for the `Woodwire` project.
 
 ## Purpose
 

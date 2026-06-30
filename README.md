@@ -1,106 +1,55 @@
-# static-js-app-blueprint
+# Woodwire
 
-> A template repository for building static frontend applications with HTML, CSS, and JavaScript.
+> Secure, asynchronous chat between a static web app and a local AI bot.
 
-## What Is This?
+Woodwire is an event-driven system for private, multimodal communication between a browser-based PWA and a local bot process. The frontend stays static and credential-free, while a Cloudflare Worker and AWS services coordinate message flow.
 
-This is a **GitHub template repository** that provides the foundational directory structure, documentation, and configuration for static frontend web applications. It is framework-agnostic — the default example uses vanilla HTML/CSS/JS, but the structure accommodates any static build output (React, Vue, Svelte, etc.).
+## Architecture Overview
 
-This template is derived from the [blueprint-repo-blueprints](https://github.com/efischer19/blueprint-repo-blueprints) grandparent template, which provides universal scaffolding for documentation, ADRs, and developer tooling.
+For full implementation details, see [`/meta/plans/`](./meta/plans/), especially the [epic executive summary](./meta/plans/epic-woodwire/00-executive-summary.md).
 
-## How to Use This Template
+```text
+[ Static PWA ]  ──────►  [ Cloudflare Worker ]  ──────►  [ AWS SQS Queue ]
+  (S3/CloudFront)          · Passphrase auth               · Event buffer
+                           · AWS secret injection           · Long-poll delivery
+                           · Pre-signed URL gen                    │
+                                                                   ▼
+[ Private S3 ]  ◄────────  [ PWA polls Worker ]           [ Local Bot ]
+  · outbox/ (AI replies)     for response status            · Outbound-only
+  · attachments/                                            · OpenClaw/Ollama
+```
 
-1. Click the **"Use this template"** button at the top of the repository page on GitHub.
-2. Choose a name for your new repository.
-3. Clone your new repository and begin building your frontend application in the `src/` directory.
+## Repository Structure
 
-For more details on GitHub template repositories, see the [official documentation](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-template-repository).
+Woodwire follows the monorepo layout defined in [ADR-006](./meta/adr/ADR-006-monorepo_structure.md):
 
-## What's Included
+```text
+woodwire/
+├── src/              # PWA frontend (HTML/CSS/JS) — deploys to S3
+├── bot/              # Local Python bot — runs on user's machine
+├── worker/           # Cloudflare Worker source — deploys to Cloudflare
+├── infra/            # IaC templates (CloudFormation/Terraform)
+├── meta/             # ADRs, plans, philosophy docs
+└── .github/workflows # CI/CD for all artifacts
+```
 
-| Path | Purpose |
-| :--- | :--- |
-| `src/` | Frontend source files — `index.html`, `assets/`, `scripts/` |
-| `meta/adr/` | Architecture Decision Records — the logbook of *why* decisions were made |
-| `meta/plans/` | Project plans and roadmaps |
-| `docs-src/` | Source files for generated documentation (e.g., MkDocs) |
-| `scripts/` | Utility and automation scripts |
-| `.github/` | GitHub-specific configuration (issue templates, PR templates, Copilot instructions) |
+## Deploy Your Own (Quickstart)
 
-### Key Files
+> This section will be expanded as infrastructure tickets land. Use the plan docs as the source of truth in the meantime.
 
-- **`src/index.html`** — Starter page with semantic HTML and accessibility best practices
-- **`src/assets/styles.css`** — Responsive stylesheet with CSS custom properties and dark mode
-- **`src/scripts/app.js`** — JavaScript entry point with accessible theme toggle
-- **`src/assets/favicon.svg`** — Placeholder favicon
-- **`src/README.md`** — Documents the `src/` file structure and conventions
-- **`LICENSE.md`** — MIT License
-- **`CODE_OF_CONDUCT.md`** — Contributor Covenant Code of Conduct
-- **`SECURITY.md`** — Security policy and vulnerability reporting
-- **`CONTRIBUTING.md`** — Guidelines for contributing to the project
-- **`meta/adr/TEMPLATE.md`** — Template for new Architecture Decision Records
-- **`meta/adr/ADR-001-use_adrs.md`** — The founding ADR: use ADRs to document decisions
+1. Review architecture and sequencing in [`meta/plans/epic-woodwire/`](./meta/plans/epic-woodwire/).
+2. Provision AWS resources (S3, SQS, IAM) from the infra tickets.
+3. Deploy the Cloudflare Worker with passphrase auth and SQS forwarding.
+4. Run the local bot and point it at your queue and storage config.
+5. Deploy `src/` as the static PWA frontend.
 
-## Getting Started
-
-After creating a new repository from this template:
-
-### 1. Replace Template Placeholders
-
-Search the repository for the following placeholders and replace them with values appropriate for your project:
-
-| Placeholder | Description | Example |
-| :--- | :--- | :--- |
-| `{{PROJECT_NAME}}` | Your repository / project name | `my-awesome-project` |
-| `{{GITHUB_OWNER}}` | GitHub username or organization | `my-org` |
-| `{{APP_NAME}}` | Application directory name (in `templates/readme/apps.md`) | `web-app` |
-| `{{LIB_NAME}}` | Library directory name (in `templates/readme/libs.md`) | `core-utils` |
-| `{{CATEGORY_NAME}}` | Feature category (in `docs-src/feature-request-automation.md`) | `data-pipeline` |
-| `{{PROJECT_URL}}` | Public URL for your project (in `meta/ROBOT_ETHICS.md`) | `https://example.com` |
-
-### 2. Customize Key Files
-
-- **`README.md`** — Replace this content with your project's description.
-- **`mkdocs.yml`** — Update site name, description, and URL after replacing placeholders.
-- **`docs-src/index.md`** — Replace the placeholder setup instructions with your own.
-- **`meta/DEVELOPMENT_PHILOSOPHY.md`** — Review and adjust principles to fit your project's needs.
-- **`SECURITY.md`** — Update contact information for vulnerability reporting.
-
-### 3. Preview the Starter Page
-
-Open `src/index.html` directly in a browser — no build step or dev server required.
-
-### 4. Build Your Application
-
-Edit files in `src/` to build your frontend application:
-
-- **`src/index.html`** — Add your HTML content with semantic markup
-- **`src/assets/styles.css`** — Add your styles
-- **`src/scripts/app.js`** — Add your JavaScript logic
-
-### 5. Adding a Build Step (Optional)
-
-The default setup requires no build step. If you need a bundler (e.g., for JSX, TypeScript, or module bundling), add your configuration at the project root:
-
-- **Vite**: `npm create vite@latest . -- --template vanilla` and point `root` to `src/`
-- **Webpack**: Add `webpack.config.js` at the project root
-- **Parcel**: Run `npx parcel src/index.html`
-
-Document your choice in a new ADR (see `meta/adr/TEMPLATE.md`).
-
-### 6. Set Up Local Development
+### Local Quality Checks
 
 ```bash
-# Install pre-commit hooks
 pip install pre-commit
-pre-commit install
-
-# Run local quality checks
-./scripts/local-ci-check.sh
-
-# Build documentation (optional)
-pip install -r docs-requirements.txt
-./scripts/build-docs.sh
+pre-commit run --all-files
+npx --yes markdownlint-cli2 "**/*.md"
+npx --yes htmlhint "src/**/*.html"
 ```
 
 ### 7. Verify CI
@@ -182,11 +131,7 @@ Configure the following in **Settings → Secrets and variables → Actions → 
 
 ## Design Principles
 
-- **Framework-agnostic.** The default is vanilla HTML/CSS/JS, but the structure supports any frontend framework or build tool.
-- **No build step required.** Open `src/index.html` in a browser and start building.
-- **Minimal by design.** Only universal scaffolding is included — add tools and dependencies as needed.
-- **Documentation-first.** Every significant decision is captured in an ADR.
-- **AI-friendly.** The structure and conventions are designed to work well with AI-assisted development workflows.
+Development standards and contributor expectations are documented in [`meta/DEVELOPMENT_PHILOSOPHY.md`](./meta/DEVELOPMENT_PHILOSOPHY.md).
 
 ## License
 

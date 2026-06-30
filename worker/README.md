@@ -90,7 +90,7 @@ Worker cold starts or when requests land on different isolates.
 
 Health check. This is the only unauthenticated endpoint.
 
-**Response**
+#### Response
 
 ```json
 {
@@ -104,7 +104,7 @@ Queues a new chat request for the local bot.
 
 **Auth:** Required
 
-**Request body**
+#### Request body
 
 ```json
 {
@@ -118,7 +118,7 @@ Queues a new chat request for the local bot.
 - `text` must be a non-empty string
 - `attachments` must be an array of non-empty string keys
 
-**Success response**
+#### Success response
 
 ```http
 HTTP/1.1 202 Accepted
@@ -131,7 +131,7 @@ HTTP/1.1 202 Accepted
 }
 ```
 
-**SQS message shape**
+#### SQS message shape
 
 ```json
 {
@@ -150,7 +150,7 @@ Reserves a pre-signed S3 upload URL for an attachment.
 
 **Auth:** Required
 
-**Request body**
+#### Request body
 
 ```json
 {
@@ -166,7 +166,7 @@ validates the filename and `contentType` but cannot perform the 25 MB preflight
 size check. Allowed MIME types are `image/*`, `audio/*`, `text/*`, and
 `application/pdf`.
 
-**Success response**
+#### Success response
 
 ```json
 {
@@ -187,7 +187,7 @@ objects in S3. Results are cached at the Cloudflare edge for 2–5 seconds per
 
 **Auth:** Required
 
-**Response**
+#### Response
 
 ```json
 {
@@ -209,7 +209,7 @@ Returns response content or a pre-signed download URL for bot output.
 
 **Auth:** Required
 
-**Success response**
+#### Success response
 
 ```json
 {

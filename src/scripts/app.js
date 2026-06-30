@@ -332,7 +332,7 @@ function startAttachmentUpload(file, elements, state) {
     progress: 0,
     sizeBytes: file.size,
     status: "uploading",
-    uploadAbortController: null,
+    cancelUpload: null,
   };
 
   state.composerAttachments.push(attachment);
@@ -407,7 +407,7 @@ async function requestUploadReservation(file) {
 function uploadAttachmentFile(uploadUrl, file, onProgress, attachment) {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
-    attachment.uploadAbortController = () => request.abort();
+    attachment.cancelUpload = () => request.abort();
     request.open("PUT", uploadUrl);
     request.setRequestHeader("Content-Type", normalizeAttachmentContentType(file.type));
     request.upload.addEventListener("progress", (event) => {
@@ -418,7 +418,7 @@ function uploadAttachmentFile(uploadUrl, file, onProgress, attachment) {
       onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
     });
     request.addEventListener("load", () => {
-      attachment.uploadAbortController = null;
+      attachment.cancelUpload = null;
 
       if (request.status >= 200 && request.status < 300) {
         resolve();
@@ -428,11 +428,11 @@ function uploadAttachmentFile(uploadUrl, file, onProgress, attachment) {
       reject(new Error(`Upload failed with status ${request.status}.`));
     });
     request.addEventListener("error", () => {
-      attachment.uploadAbortController = null;
+      attachment.cancelUpload = null;
       reject(new Error("Upload failed. Check your connection and try again."));
     });
     request.addEventListener("abort", () => {
-      attachment.uploadAbortController = null;
+      attachment.cancelUpload = null;
       reject(Object.assign(new Error("Upload aborted"), { aborted: true }));
     });
     request.send(file);
@@ -462,7 +462,7 @@ function removeComposerAttachment(attachmentId, elements, state) {
   }
 
   const [attachment] = state.composerAttachments.splice(attachmentIndex, 1);
-  attachment.uploadAbortController?.();
+  attachment.cancelUpload?.();
 
   renderPendingAttachments(elements, state);
   refreshComposerControls(elements, state);
@@ -1086,7 +1086,7 @@ function normalizeStoredAttachments(attachments = []) {
   return attachments
     .filter((attachment) => attachment && typeof attachment === "object")
     .map((attachment) => ({
-      contentType: attachment.contentType || "application/octet-stream",
+      contentType: attachment.contentType || "",
       key: attachment.key || "",
       linkUrl: attachment.linkUrl || null,
       name: attachment.name || attachment.key || "Attachment",

@@ -10,9 +10,15 @@
 const STORAGE_KEYS = {
   apiBase: "woodwire_api_base",
   auth: "woodwire_auth",
+  history: "woodwire_history",
+  pendingConversations: "woodwire_pending_conversations",
   queue: "woodwire_queue",
 };
+const WORKER_BASE_URL = window.location.origin;
+const WORKER_BASE_ORIGIN = new URL(WORKER_BASE_URL).origin;
+const MAX_STORED_MESSAGES = 200;
 const POLL_INTERVAL_MS = 3000;
+const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 const SERVICE_WORKER_PATH = "sw.js";
 let fallbackMessageCounter = 0;
 
@@ -28,11 +34,16 @@ function initChatApp() {
   }
 
   const state = {
-    activePollers: new Map(),
     isDrainingQueue: false,
+    pendingConversations: new Map(
+      getPendingConversations().map((conversation) => [conversation.conversationId, conversation]),
+    ),
+    pollTimer: 0,
+    queueRetryTimer: 0,
   };
 
   hydrateSetupForm(elements);
+  renderStoredMessages(elements);
   renderQueuedMessages(elements);
   updateConnectivity(elements);
   updateQueueStatus(elements);
@@ -61,6 +72,7 @@ function initChatApp() {
       elements.messageInput.focus();
 
       if (navigator.onLine) {
+        ensurePollingLoop(elements, state);
         void drainQueue(elements, state);
       }
     } catch (error) {
@@ -120,18 +132,21 @@ function initChatApp() {
   window.addEventListener("online", () => {
     updateConnectivity(elements);
     showFlashMessage(elements, "Back online. Sending queued messages.");
+    ensurePollingLoop(elements, state);
     void drainQueue(elements, state).catch(() => {
       showFlashMessage(elements, "Queued messages could not be resent.", true);
     });
   });
 
   window.addEventListener("offline", () => {
+    stopPollingLoop(state);
     updateConnectivity(elements);
     updateQueueStatus(elements);
     announce(elements, "You are offline. Messages will be queued.");
   });
 
   if (navigator.onLine) {
+    ensurePollingLoop(elements, state);
     void drainQueue(elements, state).catch(() => {
       showFlashMessage(elements, "Queued messages could not be resent.", true);
     });
@@ -157,7 +172,7 @@ function getAppElements() {
 }
 
 function hydrateSetupForm(elements) {
-  elements.workerUrl.value = getStorageItem(STORAGE_KEYS.apiBase) || "";
+  elements.workerUrl.value = getStorageItem(STORAGE_KEYS.apiBase) || WORKER_BASE_URL;
   elements.passphrase.value = getStorageItem(STORAGE_KEYS.auth) || "";
   toggleSetupPanel(elements, !getStorageItem(STORAGE_KEYS.auth));
 }
@@ -216,17 +231,39 @@ async function sendMessage(message, elements, state) {
       method: "POST",
     });
     if (!response.ok) {
-      throw new Error(await getErrorMessage(response));
+      throw await createResponseError(response);
     }
 
     const payload = await response.json();
     updateMessageStatus(elements, message.localId, "Sent · waiting for reply", false);
-    startConversationPolling(payload.conversationId, message.localId, elements, state);
+    trackPendingConversation(state, {
+      conversationId: payload.conversationId,
+      localId: message.localId,
+      startedAt: Date.now(),
+    });
+    ensurePollingLoop(elements, state);
     announce(elements, "Message sent. Waiting for a reply.");
     return "sent";
   } catch (error) {
     if (isNetworkFailure(error)) {
+      showFlashMessage(
+        elements,
+        "Connection lost. Message will be sent when you're back online.",
+        true,
+      );
       updateMessageStatus(elements, message.localId, "Queued for delivery", false);
+      return "queued";
+    }
+
+    if (error.status === 401) {
+      handleAuthenticationFailure(elements, state, message.localId);
+      return "error";
+    }
+
+    if (error.status === 429) {
+      scheduleQueueDrain(elements, state, getBackoffDelay(error));
+      updateMessageStatus(elements, message.localId, "Queued for retry", false);
+      showFlashMessage(elements, error.message, true);
       return "queued";
     }
 
@@ -236,65 +273,156 @@ async function sendMessage(message, elements, state) {
   }
 }
 
-function startConversationPolling(conversationId, localId, elements, state) {
-  if (state.activePollers.has(conversationId)) {
+function trackPendingConversation(state, conversation) {
+  state.pendingConversations.set(conversation.conversationId, conversation);
+  syncPendingConversations(state);
+}
+
+function clearPendingConversation(conversationId, state) {
+  state.pendingConversations.delete(conversationId);
+  syncPendingConversations(state);
+}
+
+function ensurePollingLoop(elements, state, delayMs = 0) {
+  if (
+    state.pollTimer ||
+    !navigator.onLine ||
+    !state.pendingConversations.size ||
+    !getStorageItem(STORAGE_KEYS.auth)
+  ) {
     return;
   }
 
-  const poll = async () => {
-    try {
-      const response = await workerFetch(`/api/status/${conversationId}`, {
-        method: "GET",
-      });
-      if (!response.ok) {
-        throw new Error(await getErrorMessage(response));
-      }
+  state.pollTimer = window.setTimeout(async () => {
+    state.pollTimer = 0;
+    await runPollingCycle(elements, state);
+  }, delayMs);
+}
 
-      const payload = await response.json();
-      const statusLabel =
-        payload.status === "complete"
-          ? "Reply ready"
-          : payload.status === "processing"
-            ? "Bot is replying…"
-            : "Waiting for the bot…";
+async function runPollingCycle(elements, state) {
+  if (!state.pendingConversations.size) {
+    return;
+  }
 
-      updateMessageStatus(elements, localId, statusLabel, false);
+  let nextDelayMs = POLL_INTERVAL_MS;
 
-      if (payload.status === "complete") {
-        stopConversationPolling(conversationId, state);
-        await appendAssistantReply(conversationId, elements);
-      }
-    } catch (error) {
-      if (!isNetworkFailure(error)) {
-        stopConversationPolling(conversationId, state);
-        updateMessageStatus(elements, localId, error.message, true);
-      }
+  for (const conversation of state.pendingConversations.values()) {
+    const result = await pollConversation(conversation, elements, state);
+
+    if (result?.stopLoop) {
+      return;
     }
-  };
 
-  poll();
-  const timer = window.setInterval(poll, POLL_INTERVAL_MS);
-  state.activePollers.set(conversationId, timer);
-}
+    if (result?.nextDelayMs) {
+      nextDelayMs = Math.max(nextDelayMs, result.nextDelayMs);
+    }
+  }
 
-function stopConversationPolling(conversationId, state) {
-  const timer = state.activePollers.get(conversationId);
-  if (timer) {
-    window.clearInterval(timer);
-    state.activePollers.delete(conversationId);
+  if (state.pendingConversations.size) {
+    ensurePollingLoop(elements, state, nextDelayMs);
   }
 }
 
-async function appendAssistantReply(conversationId, elements) {
-  if (elements.messageHistory.querySelector(`[data-response-for="${conversationId}"]`)) {
+function stopPollingLoop(state) {
+  if (state.pollTimer) {
+    window.clearTimeout(state.pollTimer);
+    state.pollTimer = 0;
+  }
+}
+
+async function pollConversation(conversation, elements, state) {
+  if (Date.now() - conversation.startedAt >= POLL_TIMEOUT_MS) {
+    clearPendingConversation(conversation.conversationId, state);
+    updateMessageStatus(
+      elements,
+      conversation.localId,
+      "The AI is taking longer than expected. Your message was received and will be processed.",
+      false,
+    );
+    showFlashMessage(
+      elements,
+      "The AI is taking longer than expected. Your message was received and will be processed.",
+      true,
+    );
+    return { nextDelayMs: POLL_INTERVAL_MS };
+  }
+
+  try {
+    const response = await workerFetch(`/api/status/${conversation.conversationId}`, {
+      method: "GET",
+    });
+    if (!response.ok) {
+      throw await createResponseError(response);
+    }
+
+    const payload = await response.json();
+    const statusLabel =
+      payload.status === "complete"
+        ? "Reply ready"
+        : payload.status === "processing"
+          ? "Bot is replying…"
+          : "Waiting for the bot…";
+
+    updateMessageStatus(elements, conversation.localId, statusLabel, false);
+
+    if (payload.status === "complete") {
+      await appendAssistantReply(conversation, elements);
+      clearPendingConversation(conversation.conversationId, state);
+      updateMessageStatus(elements, conversation.localId, "Reply received", false);
+    }
+
+    return {
+      nextDelayMs: normalizePollDelay(payload.cacheTtlSeconds),
+    };
+  } catch (error) {
+    if (isNetworkFailure(error)) {
+      updateMessageStatus(elements, conversation.localId, "Waiting to reconnect…", false);
+      showFlashMessage(
+        elements,
+        "Connection lost. Message will be sent when you're back online.",
+        true,
+      );
+
+      if (!navigator.onLine) {
+        stopPollingLoop(state);
+      }
+
+      return { nextDelayMs: POLL_INTERVAL_MS };
+    }
+
+    if (error.status === 401) {
+      updateMessageStatus(elements, conversation.localId, error.message, true);
+      handleAuthenticationFailure(elements, state);
+      return { stopLoop: true };
+    }
+
+    if (error.status === 429) {
+      updateMessageStatus(elements, conversation.localId, "Waiting to retry…", false);
+      showFlashMessage(elements, error.message, true);
+      return { nextDelayMs: getBackoffDelay(error) };
+    }
+
+    clearPendingConversation(conversation.conversationId, state);
+    updateMessageStatus(elements, conversation.localId, error.message, true);
+    showFlashMessage(elements, error.message, true);
+    return { nextDelayMs: POLL_INTERVAL_MS };
+  }
+}
+
+async function appendAssistantReply(conversation, elements) {
+  if (
+    elements.messageHistory.querySelector(
+      `[data-response-for="${conversation.conversationId}"]`,
+    )
+  ) {
     return;
   }
 
-  const response = await workerFetch(`/api/response/${conversationId}`, {
+  const response = await workerFetch(`/api/response/${conversation.conversationId}`, {
     method: "GET",
   });
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response));
+    throw await createResponseError(response);
   }
 
   const payload = await response.json();
@@ -306,7 +434,8 @@ async function appendAssistantReply(conversationId, elements) {
   const replyText = await download.text();
   appendMessage(elements, {
     author: "AI",
-    responseFor: conversationId,
+    conversationId: conversation.conversationId,
+    responseFor: conversation.conversationId,
     text: replyText || "The bot returned an empty reply.",
     timestamp: new Date().toISOString(),
     variant: "assistant",
@@ -365,7 +494,34 @@ function renderQueuedMessages(elements) {
   }
 }
 
-function appendMessage(elements, message) {
+function renderStoredMessages(elements) {
+  const history = getStoredMessages();
+
+  if (!history.length) {
+    return;
+  }
+
+  elements.messageHistory.innerHTML = "";
+
+  for (const message of history) {
+    appendMessage(
+      elements,
+      {
+        author: message.role === "ai" ? "AI" : "You",
+        conversationId: message.conversationId,
+        localId: message.role === "user" ? message.id : undefined,
+        responseFor: message.role === "ai" ? message.conversationId || message.id : undefined,
+        status: message.role === "user" ? message.status || undefined : undefined,
+        text: message.text,
+        timestamp: message.timestamp,
+        variant: message.role === "ai" ? "assistant" : "user",
+      },
+      { persist: false },
+    );
+  }
+}
+
+function appendMessage(elements, message, options = {}) {
   const article = document.createElement("article");
   article.className = `message message-${message.variant}`;
 
@@ -403,6 +559,10 @@ function appendMessage(elements, message) {
   article.append(body, meta);
   elements.messageHistory.append(article);
   elements.messageHistory.scrollTop = elements.messageHistory.scrollHeight;
+
+  if (options.persist !== false) {
+    upsertStoredMessage(message);
+  }
 }
 
 function updateMessageStatus(elements, localId, statusText, isError) {
@@ -418,6 +578,7 @@ function updateMessageStatus(elements, localId, statusText, isError) {
 
   status.textContent = statusText;
   status.classList.toggle("is-error", isError);
+  updateStoredMessageStatus(localId, statusText);
 }
 
 function updateQueueStatus(elements) {
@@ -464,10 +625,63 @@ function setQueuedMessages(queue) {
   setStorageItem(STORAGE_KEYS.queue, JSON.stringify(queue));
 }
 
+function getStoredMessages() {
+  return getStorageJson(STORAGE_KEYS.history, []);
+}
+
+function setStoredMessages(messages) {
+  setStorageItem(
+    STORAGE_KEYS.history,
+    JSON.stringify(messages.slice(-MAX_STORED_MESSAGES)),
+  );
+}
+
+function upsertStoredMessage(message) {
+  const storedMessage = {
+    conversationId: message.conversationId || message.responseFor || null,
+    id: message.variant === "assistant" ? message.responseFor : message.localId,
+    role: message.variant === "assistant" ? "ai" : "user",
+    status: message.status || null,
+    text: message.text,
+    timestamp: message.timestamp,
+  };
+  const messages = getStoredMessages().filter((item) =>
+    isDifferentStoredMessage(item, storedMessage),
+  );
+
+  messages.push(storedMessage);
+  setStoredMessages(messages);
+}
+
+function updateStoredMessageStatus(localId, statusText) {
+  const messages = getStoredMessages().map((message) =>
+    message.role === "user" && message.id === localId
+      ? { ...message, status: statusText }
+      : message,
+  );
+
+  setStoredMessages(messages);
+}
+
+function getPendingConversations() {
+  return getStorageJson(STORAGE_KEYS.pendingConversations, []);
+}
+
+function syncPendingConversations(state) {
+  setStorageItem(
+    STORAGE_KEYS.pendingConversations,
+    JSON.stringify(Array.from(state.pendingConversations.values())),
+  );
+}
+
+function isDifferentStoredMessage(message, storedMessage) {
+  return message.id !== storedMessage.id || message.role !== storedMessage.role;
+}
+
 function normalizeApiBaseUrl(value) {
   const trimmed = value.trim();
   if (!trimmed) {
-    return window.location.origin;
+    return WORKER_BASE_ORIGIN;
   }
 
   const url = new URL(trimmed);
@@ -480,7 +694,7 @@ function normalizeApiBaseUrl(value) {
 
 async function workerFetch(pathname, options) {
   const auth = getStorageItem(STORAGE_KEYS.auth);
-  const apiBase = getStorageItem(STORAGE_KEYS.apiBase) || window.location.origin;
+  const apiBase = getStorageItem(STORAGE_KEYS.apiBase) || WORKER_BASE_URL;
   const url = new URL(pathname, `${apiBase}/`);
   const headers = new Headers(options?.headers || {});
 
@@ -507,8 +721,69 @@ async function getErrorMessage(response) {
   return `Request failed with status ${response.status}.`;
 }
 
+async function createResponseError(response) {
+  const message =
+    response.status === 401
+      ? "Authentication failed. Please re-enter your passphrase."
+      : response.status === 429
+        ? "Too many requests. Please wait a moment."
+        : await getErrorMessage(response);
+  const retryAfterSeconds = Number.parseInt(response.headers.get("Retry-After") || "", 10);
+
+  return Object.assign(new Error(message), {
+    retryAfterMs:
+      Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+        ? retryAfterSeconds * 1000
+        : POLL_INTERVAL_MS * 2,
+    status: response.status,
+  });
+}
+
 function isNetworkFailure(error) {
   return error instanceof TypeError;
+}
+
+function normalizePollDelay(cacheTtlSeconds) {
+  return Math.max(POLL_INTERVAL_MS, Number(cacheTtlSeconds || 0) * 1000);
+}
+
+function getBackoffDelay(error) {
+  return error.retryAfterMs || POLL_INTERVAL_MS * 2;
+}
+
+function scheduleQueueDrain(elements, state, delayMs) {
+  if (state.queueRetryTimer) {
+    window.clearTimeout(state.queueRetryTimer);
+  }
+
+  state.queueRetryTimer = window.setTimeout(() => {
+    state.queueRetryTimer = 0;
+
+    if (navigator.onLine) {
+      void drainQueue(elements, state);
+    }
+  }, delayMs);
+}
+
+function handleAuthenticationFailure(elements, state, localId) {
+  stopPollingLoop(state);
+  setStorageItem(STORAGE_KEYS.auth, "");
+  elements.passphrase.value = "";
+  toggleSetupPanel(elements, true);
+  updateConnectionUi(elements);
+  updateQueueStatus(elements);
+  showFlashMessage(elements, "Authentication failed. Please re-enter your passphrase.", true);
+
+  if (localId) {
+    updateMessageStatus(
+      elements,
+      localId,
+      "Authentication failed. Please re-enter your passphrase.",
+      true,
+    );
+  }
+
+  elements.passphrase.focus();
 }
 
 function formatTimestamp(value) {

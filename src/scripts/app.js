@@ -14,7 +14,8 @@ const STORAGE_KEYS = {
   pendingConversations: "woodwire_pending_conversations",
   queue: "woodwire_queue",
 };
-const WORKER_BASE_URL = "https://woodwire.your-domain.workers.dev";
+const WORKER_BASE_URL = window.location.origin;
+const WORKER_BASE_ORIGIN = new URL(WORKER_BASE_URL).origin;
 const MAX_STORED_MESSAGES = 200;
 const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 5 * 60 * 1000;
@@ -644,8 +645,8 @@ function upsertStoredMessage(message) {
     text: message.text,
     timestamp: message.timestamp,
   };
-  const messages = getStoredMessages().filter(
-    (item) => !(item.id === storedMessage.id && item.role === storedMessage.role),
+  const messages = getStoredMessages().filter((item) =>
+    isDifferentStoredMessage(item, storedMessage),
   );
 
   messages.push(storedMessage);
@@ -673,10 +674,14 @@ function syncPendingConversations(state) {
   );
 }
 
+function isDifferentStoredMessage(message, storedMessage) {
+  return message.id !== storedMessage.id || message.role !== storedMessage.role;
+}
+
 function normalizeApiBaseUrl(value) {
   const trimmed = value.trim();
   if (!trimmed) {
-    return new URL(WORKER_BASE_URL).origin;
+    return WORKER_BASE_ORIGIN;
   }
 
   const url = new URL(trimmed);

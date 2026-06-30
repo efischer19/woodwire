@@ -1564,11 +1564,20 @@ function renderVoiceMemoState(elements, state) {
     : hasPreview
       ? "Re-record"
       : "Record";
+  elements.voiceMemoButton.setAttribute(
+    "aria-label",
+    state.voiceMemo.isRecording
+      ? "Stop voice memo recording"
+      : hasPreview
+        ? "Re-record voice memo"
+        : "Record voice memo",
+  );
   elements.voiceMemoElapsed.textContent = `Recording… ${formatElapsedTime(state.voiceMemo.durationMs)}`;
 
   if (hasPreview) {
     elements.voiceMemoAudio.src = state.voiceMemo.previewUrl;
-    elements.voiceMemoPreviewSummary.textContent = `Voice memo ready - ${formatElapsedTime(state.voiceMemo.durationMs)}`;
+    elements.voiceMemoPreviewSummary.textContent =
+      `Voice memo ready. Duration: ${formatElapsedTime(state.voiceMemo.durationMs)}`;
   } else if (elements.voiceMemoAudio.hasAttribute("src")) {
     elements.voiceMemoAudio.removeAttribute("src");
     elements.voiceMemoAudio.load();

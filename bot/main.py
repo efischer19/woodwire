@@ -74,7 +74,7 @@ class WoodwireBot:
         self.config = config
         self.logger = logger or logging.getLogger("woodwire.bot")
         self.now = now or (lambda: datetime.now(timezone.utc))
-        self.ai_backend = ai_backend or build_ai_backend(logger=self.logger)
+        self.ai_backend = ai_backend or build_ai_backend(os.environ, logger=self.logger)
         self.sleep = sleep
         self.temp_root_dir = temp_root_dir or tempfile.gettempdir()
         self.running = True
@@ -210,9 +210,14 @@ class WoodwireBot:
         attachment_paths: list[str] = []
 
         for index, key in enumerate(attachment_keys):
-            filename = os.path.basename(key.rstrip("/")) or f"attachment-{index}"
+            normalized_key = key.strip()
+            filename = os.path.basename(normalized_key.rstrip("/")) or f"attachment-{index}"
             local_path = os.path.join(temp_dir, f"{index:02d}-{filename}")
-            self.s3_client.download_file(self.config.s3_bucket_name, key, local_path)
+            self.s3_client.download_file(
+                self.config.s3_bucket_name,
+                normalized_key,
+                local_path,
+            )
             attachment_paths.append(local_path)
 
         return attachment_paths

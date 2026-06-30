@@ -549,7 +549,8 @@ function registerServiceWorker() {
   }
 
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register(new URL("sw.js", window.location.href)).catch(() => {
+    const serviceWorkerUrl = new URL("sw.js", window.location.href).toString();
+    navigator.serviceWorker.register(serviceWorkerUrl).catch(() => {
       // Ignore registration failures in unsupported local environments.
     });
   });

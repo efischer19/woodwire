@@ -193,6 +193,8 @@ objects in S3. Results are cached at the Cloudflare edge for 2–5 seconds per
 {
   "conversationId": "9f4fd2aa-6f7d-4e3a-9564-c6470cbaad37",
   "status": "pending",
+  "hasAudio": false,
+  "hasTranscript": false,
   "cacheTtlSeconds": 3
 }
 ```
@@ -213,14 +215,15 @@ Returns response content or a pre-signed download URL for bot output.
 
 ```json
 {
-  "downloadUrl": "https://example-presigned-url",
-  "key": "outbox/9f4fd2aa-6f7d-4e3a-9564-c6470cbaad37/1719758400-response.md"
+  "transcript": "AI response text here...",
+  "audioUrl": "https://example-presigned-url"
 }
 ```
 
 The Worker lists `outbox/{conversationId}/`, ignores the
-`processing.json` marker, and returns a pre-signed `GET` URL for the first
-completed object it finds. Download URLs expire in 15 minutes.
+`processing.json` marker, reads any `.md` transcript object, and returns a
+pre-signed `GET` URL for any `.mp3` audio object it finds. Download URLs
+expire in 15 minutes.
 
 ## Error Codes
 

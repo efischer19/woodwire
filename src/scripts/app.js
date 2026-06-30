@@ -9,6 +9,7 @@
 
 const STORAGE_KEYS = {
   apiBase: "woodwire_api_base",
+  autoplay: "woodwire_autoplay",
   auth: "woodwire_auth",
   history: "woodwire_history",
   pendingConversations: "woodwire_pending_conversations",
@@ -24,8 +25,10 @@ const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 const SERVICE_WORKER_PATH = "sw.js";
 const ATTACHMENT_DOWNLOAD_URLS = new Map();
+const VOICE_RESPONSE_AUDIO_URLS = new Map();
 const VOICE_MEMO_READY_TEXT = "Voice memo ready.";
 const VOICE_MEMO_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+const VOICE_RESPONSE_NO_TRANSCRIPT_TEXT = "Voice response — no transcript available";
 let fallbackMessageCounter = 0;
 let fallbackAttachmentCounter = 0;
 
@@ -77,6 +80,7 @@ function initChatApp() {
 
       setStorageItem(STORAGE_KEYS.apiBase, apiBaseUrl);
       setStorageItem(STORAGE_KEYS.auth, passphrase);
+      setVoiceAutoplayPreference(elements.autoplayVoice?.checked);
       toggleSetupPanel(elements, false);
       updateConnectionUi(elements);
       refreshComposerControls(elements, state);
@@ -95,6 +99,16 @@ function initChatApp() {
 
   elements.connectionSettings.addEventListener("click", () => {
     toggleSetupPanel(elements, elements.setupPanel.classList.contains("is-hidden"));
+  });
+
+  elements.autoplayVoice?.addEventListener("change", () => {
+    setVoiceAutoplayPreference(elements.autoplayVoice.checked);
+    announce(
+      elements,
+      elements.autoplayVoice.checked
+        ? "Voice reply autoplay enabled."
+        : "Voice reply autoplay disabled.",
+    );
   });
 
   elements.attachmentButton.addEventListener("click", () => {
@@ -217,6 +231,7 @@ function getAppElements() {
     attachmentInput: document.getElementById("attachment-input"),
     attachmentPreviews: document.getElementById("attachment-previews"),
     attachmentStatus: document.getElementById("attachment-status"),
+    autoplayVoice: document.getElementById("autoplay-voice"),
     composer: document.getElementById("composer"),
     connectionSettings: document.getElementById("connection-settings"),
     flashMessage: document.getElementById("flash-message"),
@@ -247,6 +262,9 @@ function getAppElements() {
 function hydrateSetupForm(elements) {
   elements.workerUrl.value = getStorageItem(STORAGE_KEYS.apiBase) || WORKER_BASE_URL;
   elements.passphrase.value = getStorageItem(STORAGE_KEYS.auth) || "";
+  if (elements.autoplayVoice) {
+    elements.autoplayVoice.checked = isVoiceAutoplayEnabled();
+  }
   toggleSetupPanel(elements, !getStorageItem(STORAGE_KEYS.auth));
 }
 
@@ -800,7 +818,9 @@ async function pollConversation(conversation, elements, state) {
     const payload = await response.json();
     const statusLabel =
       payload.status === "complete"
-        ? "Reply ready"
+        ? payload.hasAudio
+          ? "Voice reply ready"
+          : "Reply ready"
         : payload.status === "processing"
           ? "Bot is replying…"
           : "Waiting for the bot…";
@@ -868,21 +888,33 @@ async function appendAssistantReply(conversation, elements) {
   }
 
   const payload = await response.json();
-  const download = await fetch(payload.downloadUrl);
-  if (!download.ok) {
-    throw new Error("The reply is ready, but the response download failed.");
-  }
-
-  const replyText = await download.text();
+  const transcript = normalizeAssistantTranscript(payload.transcript);
+  const audioUrl = normalizeVoiceResponseAudioUrl(payload.audioUrl);
+  const replyText =
+    transcript || (audioUrl ? VOICE_RESPONSE_NO_TRANSCRIPT_TEXT : "The bot returned an empty reply.");
   appendMessage(elements, {
     author: "AI",
     conversationId: conversation.conversationId,
     responseFor: conversation.conversationId,
-    text: replyText || "The bot returned an empty reply.",
+    text: replyText,
     timestamp: new Date().toISOString(),
     variant: "assistant",
+    voiceResponse: audioUrl
+      ? {
+          audioUrl,
+          conversationId: conversation.conversationId,
+          hasAudio: true,
+        }
+      : null,
   });
-  announce(elements, "AI reply received.");
+  announce(
+    elements,
+    audioUrl
+      ? transcript
+        ? "AI voice reply received with transcript."
+        : "AI voice reply received without transcript."
+      : "AI reply received.",
+  );
 }
 
 async function drainQueue(elements, state) {
@@ -959,6 +991,10 @@ function renderStoredMessages(elements) {
         text: message.text,
         timestamp: message.timestamp,
         variant: message.role === "ai" ? "assistant" : "user",
+        voiceResponse:
+          message.role === "ai"
+            ? normalizeStoredVoiceResponse(message.voiceResponse, message.conversationId)
+            : null,
       },
       { persist: false },
     );
@@ -983,6 +1019,10 @@ function appendMessage(elements, message, options = {}) {
   const text = document.createElement("p");
   text.textContent = message.text;
   body.append(text);
+
+  if (message.voiceResponse?.hasAudio) {
+    body.append(createVoiceResponsePlayer(elements, message.voiceResponse));
+  }
 
   if (Array.isArray(message.attachments) && message.attachments.length) {
     body.append(createMessageAttachments(elements, message.attachments));
@@ -1093,6 +1133,7 @@ function upsertStoredMessage(message) {
     status: message.status || null,
     text: message.text,
     timestamp: message.timestamp,
+    voiceResponse: serializeStoredVoiceResponse(message.voiceResponse),
   };
   const messages = getStoredMessages().filter((item) =>
     isDifferentStoredMessage(item, storedMessage),
@@ -1100,6 +1141,29 @@ function upsertStoredMessage(message) {
 
   messages.push(storedMessage);
   setStoredMessages(messages);
+}
+
+function serializeStoredVoiceResponse(voiceResponse) {
+  if (!voiceResponse?.hasAudio || !voiceResponse.conversationId) {
+    return null;
+  }
+
+  return {
+    conversationId: voiceResponse.conversationId,
+    hasAudio: true,
+  };
+}
+
+function normalizeStoredVoiceResponse(voiceResponse, fallbackConversationId) {
+  const conversationId = voiceResponse?.conversationId || fallbackConversationId;
+  if (!voiceResponse?.hasAudio || !conversationId) {
+    return null;
+  }
+
+  return {
+    conversationId,
+    hasAudio: true,
+  };
 }
 
 function updateStoredMessageStatus(localId, statusText) {
@@ -1237,6 +1301,79 @@ function createMessageAttachments(elements, attachments) {
   }
 
   return list;
+}
+
+function createVoiceResponsePlayer(elements, voiceResponse) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "voice-response";
+  wrapper.setAttribute("aria-label", "Voice response");
+  wrapper.setAttribute("role", "region");
+
+  const loadingIndicator = document.createElement("p");
+  loadingIndicator.className = "voice-response-loading";
+  loadingIndicator.setAttribute("role", "status");
+  loadingIndicator.textContent = "Downloading audio…";
+
+  const audio = document.createElement("audio");
+  audio.controls = true;
+  audio.hidden = true;
+  audio.preload = "metadata";
+  audio.setAttribute("aria-label", "AI voice response");
+
+  const source = document.createElement("source");
+  source.type = "audio/mpeg";
+  audio.append(source, "Your browser does not support audio playback.");
+  wrapper.append(loadingIndicator, audio);
+
+  void hydrateVoiceResponseAudio(elements, voiceResponse, audio, source, loadingIndicator);
+
+  return wrapper;
+}
+
+async function hydrateVoiceResponseAudio(elements, voiceResponse, audio, source, loadingIndicator) {
+  try {
+    const audioUrl =
+      normalizeVoiceResponseAudioUrl(voiceResponse.audioUrl) ||
+      (await getVoiceResponseAudioUrl(voiceResponse.conversationId));
+
+    if (voiceResponse.conversationId) {
+      VOICE_RESPONSE_AUDIO_URLS.set(voiceResponse.conversationId, audioUrl);
+    }
+
+    audio.addEventListener(
+      "loadedmetadata",
+      () => {
+        audio.hidden = false;
+        loadingIndicator.hidden = true;
+
+        if (isVoiceAutoplayEnabled()) {
+          void attemptVoiceResponseAutoplay(audio);
+        }
+      },
+      { once: true },
+    );
+    audio.addEventListener(
+      "error",
+      () => {
+        loadingIndicator.textContent = "Audio could not be loaded.";
+      },
+      { once: true },
+    );
+
+    source.src = audioUrl;
+    audio.load();
+  } catch {
+    loadingIndicator.textContent = "Audio could not be loaded.";
+    announce(elements, "The voice response audio could not be loaded.");
+  }
+}
+
+async function attemptVoiceResponseAutoplay(audio) {
+  try {
+    await audio.play();
+  } catch {
+    // Autoplay is optional and may be blocked by browser policy.
+  }
 }
 
 async function hydrateAttachmentLink(elements, key, target, imageElement, audioElement) {
@@ -1620,6 +1757,34 @@ async function getAttachmentDownloadUrl(key) {
   return payload.downloadUrl;
 }
 
+async function getVoiceResponseAudioUrl(conversationId) {
+  if (!conversationId) {
+    throw new Error("Missing conversation ID");
+  }
+
+  if (VOICE_RESPONSE_AUDIO_URLS.has(conversationId)) {
+    return VOICE_RESPONSE_AUDIO_URLS.get(conversationId);
+  }
+
+  const response = await workerFetch(`/api/response/${conversationId}`, {
+    method: "GET",
+  });
+
+  if (!response.ok) {
+    throw await createResponseError(response);
+  }
+
+  const payload = await response.json();
+  const audioUrl = normalizeVoiceResponseAudioUrl(payload.audioUrl);
+
+  if (!audioUrl) {
+    throw new Error("Audio response unavailable");
+  }
+
+  VOICE_RESPONSE_AUDIO_URLS.set(conversationId, audioUrl);
+  return audioUrl;
+}
+
 function getPendingConversations() {
   return getStorageJson(STORAGE_KEYS.pendingConversations, []);
 }
@@ -1647,6 +1812,22 @@ function normalizeApiBaseUrl(value) {
   }
 
   return url.origin;
+}
+
+function normalizeAssistantTranscript(value) {
+  return typeof value === "string" ? value : "";
+}
+
+function normalizeVoiceResponseAudioUrl(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function isVoiceAutoplayEnabled() {
+  return getStorageItem(STORAGE_KEYS.autoplay) === "true";
+}
+
+function setVoiceAutoplayPreference(isEnabled) {
+  setStorageItem(STORAGE_KEYS.autoplay, String(Boolean(isEnabled)));
 }
 
 async function workerFetch(pathname, options) {

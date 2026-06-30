@@ -200,6 +200,8 @@ describe('Woodwire Worker', () => {
     expect(await firstResponse.json()).toEqual({
       cacheTtlSeconds: 3,
       conversationId: 'conversation-123',
+      hasAudio: false,
+      hasTranscript: true,
       status: 'complete',
     });
     expect(firstResponse.headers.get('CDN-Cache-Control')).toBe('max-age=3');
@@ -207,6 +209,8 @@ describe('Woodwire Worker', () => {
     expect(await secondResponse.json()).toEqual({
       cacheTtlSeconds: 3,
       conversationId: 'conversation-123',
+      hasAudio: false,
+      hasTranscript: true,
       status: 'complete',
     });
     expect(s3Send).toHaveBeenCalledTimes(1);
@@ -234,6 +238,8 @@ describe('Woodwire Worker', () => {
     expect(await response.json()).toEqual({
       cacheTtlSeconds: 3,
       conversationId: 'conversation-999',
+      hasAudio: false,
+      hasTranscript: false,
       status: 'processing',
     });
   });
@@ -403,11 +409,21 @@ describe('Woodwire Worker', () => {
     expect(signS3Url).not.toHaveBeenCalled();
   });
 
-  test('returns a pre-signed download URL for a completed response object', async () => {
+  test('returns transcript text and a pre-signed audio URL for a completed response', async () => {
     const signS3Url = vi.fn().mockResolvedValue('https://downloads.example.com/presigned-get');
-    const s3Send = vi.fn().mockResolvedValue({
-      Contents: [{ Key: 'outbox/conversation-123/1719758400000-response.mp3' }],
-    });
+    const s3Send = vi
+      .fn()
+      .mockResolvedValueOnce({
+        Contents: [
+          { Key: 'outbox/conversation-123/1719758400000-response.md' },
+          { Key: 'outbox/conversation-123/1719758400000-response.mp3' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        Body: {
+          transformToString: vi.fn().mockResolvedValue('Transcript reply'),
+        },
+      });
     const worker = createWorker({
       createS3Client: () => ({
         send: s3Send,
@@ -428,10 +444,10 @@ describe('Woodwire Worker', () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      downloadUrl: 'https://downloads.example.com/presigned-get',
-      key: 'outbox/conversation-123/1719758400000-response.mp3',
+      audioUrl: 'https://downloads.example.com/presigned-get',
+      transcript: 'Transcript reply',
     });
-    expect(s3Send).toHaveBeenCalledTimes(1);
+    expect(s3Send).toHaveBeenCalledTimes(2);
     expect(signS3Url).toHaveBeenCalledTimes(1);
     expect(signS3Url.mock.calls[0][1]).toBeInstanceOf(GetObjectCommand);
     expect(signS3Url.mock.calls[0][1].input).toEqual({
@@ -439,6 +455,72 @@ describe('Woodwire Worker', () => {
       Key: 'outbox/conversation-123/1719758400000-response.mp3',
     });
     expect(signS3Url.mock.calls[0][2]).toEqual({ expiresIn: 900 });
+  });
+
+  test('returns only transcript text when no audio response exists', async () => {
+    const s3Send = vi
+      .fn()
+      .mockResolvedValueOnce({
+        Contents: [{ Key: 'outbox/conversation-555/1719758400000-response.md' }],
+      })
+      .mockResolvedValueOnce({
+        Body: {
+          transformToString: vi.fn().mockResolvedValue('Transcript only'),
+        },
+      });
+    const worker = createWorker({
+      createS3Client: () => ({
+        send: s3Send,
+      }),
+      signS3Url: vi.fn(),
+    });
+
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/response/conversation-555', {
+        headers: {
+          'X-Woodwire-Auth': baseEnv.WOODWIRE_AUTH,
+        },
+        method: 'GET',
+      }),
+      baseEnv,
+      {},
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      audioUrl: null,
+      transcript: 'Transcript only',
+    });
+  });
+
+  test('returns only a pre-signed audio URL when no transcript exists', async () => {
+    const signS3Url = vi.fn().mockResolvedValue('https://downloads.example.com/presigned-audio');
+    const s3Send = vi.fn().mockResolvedValue({
+      Contents: [{ Key: 'outbox/conversation-777/1719758400000-response.mp3' }],
+    });
+    const worker = createWorker({
+      createS3Client: () => ({
+        send: s3Send,
+      }),
+      signS3Url,
+    });
+
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/response/conversation-777', {
+        headers: {
+          'X-Woodwire-Auth': baseEnv.WOODWIRE_AUTH,
+        },
+        method: 'GET',
+      }),
+      baseEnv,
+      {},
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      audioUrl: 'https://downloads.example.com/presigned-audio',
+      transcript: null,
+    });
   });
 
   test('rejects browser requests from non-PWA origins', async () => {

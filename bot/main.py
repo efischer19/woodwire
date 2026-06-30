@@ -211,8 +211,7 @@ class WoodwireBot:
 
         for index, key in enumerate(attachment_keys):
             normalized_key = key.strip()
-            filename = build_attachment_filename(normalized_key, index)
-            local_path = os.path.join(temp_dir, f"attachment-{index:02d}-{filename}")
+            local_path = os.path.join(temp_dir, build_attachment_filename(normalized_key, index))
             self.s3_client.download_file(
                 self.config.s3_bucket_name,
                 normalized_key,
@@ -273,17 +272,19 @@ def read_attachment_keys(payload: dict[str, Any]) -> list[str]:
 
 
 def build_attachment_filename(key: str, index: int) -> str:
-    filename = os.path.basename(key.rstrip("/"))
+    base_name = os.path.basename(key.rstrip("/"))
 
     path_separators = {os.path.sep}
 
     if os.path.altsep:
         path_separators.add(os.path.altsep)
 
-    if filename in {"", ".", ".."} or any(separator in filename for separator in path_separators):
-        return f"attachment-{index:02d}"
+    if base_name in {"", ".", ".."} or any(
+        separator in base_name for separator in path_separators
+    ):
+        base_name = "file"
 
-    return filename
+    return f"attachment-{index:02d}-{base_name}"
 
 
 def configure_logging() -> logging.Logger:

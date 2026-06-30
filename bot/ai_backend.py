@@ -123,7 +123,7 @@ def build_openclaw_endpoint(environ: dict[str, str]) -> str:
 
 
 def parse_openclaw_response(body: bytes, content_type: str) -> str:
-    """Accept either raw text or common JSON text fields from local OpenClaw setups."""
+    """Accept raw text or common JSON text fields used by different OpenClaw setups."""
     text = body.decode("utf-8").strip()
 
     if not text:

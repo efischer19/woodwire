@@ -275,8 +275,13 @@ def read_attachment_keys(payload: dict[str, Any]) -> list[str]:
 def build_attachment_filename(key: str, index: int) -> str:
     filename = os.path.basename(key.rstrip("/"))
 
-    if filename in {"", ".", ".."}:
-        return f"attachment-{index}"
+    path_separators = {os.path.sep}
+
+    if os.path.altsep:
+        path_separators.add(os.path.altsep)
+
+    if filename in {"", ".", ".."} or any(separator in filename for separator in path_separators):
+        return f"attachment-{index:02d}"
 
     return filename
 

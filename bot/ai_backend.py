@@ -105,6 +105,9 @@ def build_openclaw_endpoint(environ: dict[str, str]) -> str:
     port_text = environ.get("OPENCLAW_PORT", str(DEFAULT_OPENCLAW_PORT)).strip()
     path = environ.get("OPENCLAW_PATH", DEFAULT_OPENCLAW_PATH).strip() or DEFAULT_OPENCLAW_PATH
 
+    if "://" in host or any(character in host for character in "/?#"):
+        raise ValueError("OPENCLAW_HOST must be a hostname or IP address")
+
     if not path.startswith("/"):
         path = f"/{path}"
 

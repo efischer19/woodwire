@@ -389,6 +389,25 @@ main {
   white-space: pre-wrap;
 }
 
+.message-attachments {
+  display: grid;
+  gap: var(--spacing-sm);
+  list-style: none;
+}
+
+.message-attachment-link,
+.message-attachment-name {
+  display: inline-flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.message-attachment-image {
+  width: min(100%, 16rem);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
 .message-status {
   font-size: 0.875rem;
 }
@@ -416,6 +435,66 @@ main {
 .composer textarea {
   min-height: 7.5rem;
   resize: vertical;
+}
+
+.composer-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.composer-attachment-button {
+  align-self: flex-start;
+}
+
+.attachment-previews {
+  display: grid;
+  gap: var(--spacing-sm);
+}
+
+.attachment-preview {
+  display: grid;
+  gap: var(--spacing-sm);
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg);
+}
+
+.attachment-preview-header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  align-items: flex-start;
+}
+
+.attachment-preview-name {
+  word-break: break-word;
+}
+
+.attachment-preview-meta {
+  color: var(--color-text-muted);
+  font-size: 0.9375rem;
+}
+
+.attachment-preview-status {
+  font-size: 0.9375rem;
+}
+
+.attachment-preview-status.is-error {
+  color: var(--color-error);
+}
+
+.attachment-preview-image {
+  width: min(100%, 12rem);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.attachment-remove-button {
+  min-height: auto;
+  padding: 0.5rem 0.75rem;
 }
 
 .composer-actions {

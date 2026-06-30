@@ -342,6 +342,67 @@ describe('Woodwire Worker', () => {
     expect(signS3Url).not.toHaveBeenCalled();
   });
 
+  test('returns a pre-signed download URL for an uploaded attachment', async () => {
+    const signS3Url = vi.fn().mockResolvedValue('https://downloads.example.com/presigned-attachment');
+    const worker = createWorker({
+      createS3Client: () => ({
+        send: vi.fn(),
+      }),
+      signS3Url,
+    });
+
+    const response = await worker.fetch(
+      new Request(
+        'https://worker.example.com/api/attachment?key=attachments%2Fconversation-123%2F1719758400000-object-456.png',
+        {
+          headers: {
+            'X-Woodwire-Auth': baseEnv.WOODWIRE_AUTH,
+          },
+          method: 'GET',
+        },
+      ),
+      baseEnv,
+      {},
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      downloadUrl: 'https://downloads.example.com/presigned-attachment',
+      key: 'attachments/conversation-123/1719758400000-object-456.png',
+    });
+    expect(signS3Url).toHaveBeenCalledTimes(1);
+    expect(signS3Url.mock.calls[0][1]).toBeInstanceOf(GetObjectCommand);
+    expect(signS3Url.mock.calls[0][1].input).toEqual({
+      Bucket: baseEnv.CHAT_BUCKET_NAME,
+      Key: 'attachments/conversation-123/1719758400000-object-456.png',
+    });
+    expect(signS3Url.mock.calls[0][2]).toEqual({ expiresIn: 900 });
+  });
+
+  test('rejects invalid attachment keys', async () => {
+    const signS3Url = vi.fn();
+    const worker = createWorker({
+      signS3Url,
+    });
+
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/attachment?key=../../private.txt', {
+        headers: {
+          'X-Woodwire-Auth': baseEnv.WOODWIRE_AUTH,
+        },
+        method: 'GET',
+      }),
+      baseEnv,
+      {},
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: 'Invalid attachment key',
+    });
+    expect(signS3Url).not.toHaveBeenCalled();
+  });
+
   test('returns a pre-signed download URL for a completed response object', async () => {
     const signS3Url = vi.fn().mockResolvedValue('https://downloads.example.com/presigned-get');
     const s3Send = vi.fn().mockResolvedValue({

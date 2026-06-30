@@ -133,6 +133,31 @@
               placeholder="Type a message for your local AI bot"
               required
             ></textarea>
+            <input
+              id="attachment-input"
+              class="visually-hidden"
+              type="file"
+              accept="image/*,application/pdf,text/*"
+              multiple
+            >
+            <div class="composer-tools">
+              <button
+                id="attachment-button"
+                class="secondary-button composer-attachment-button"
+                type="button"
+                aria-label="Attach a file"
+              >
+                <span aria-hidden="true">📎</span>
+                <span>Attach</span>
+              </button>
+              <p class="field-hint">Attach up to 5 images, PDFs, or text files (25 MB each).</p>
+            </div>
+            <section
+              id="attachment-previews"
+              class="attachment-previews is-hidden"
+              aria-label="Pending attachments"
+            ></section>
+            <p id="attachment-status" class="queue-status" role="status" aria-live="polite"></p>
 
             <div class="composer-actions">
               <p id="queue-status" class="queue-status" role="status" aria-live="polite">

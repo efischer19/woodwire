@@ -408,6 +408,15 @@ main {
   border-radius: var(--radius-sm);
 }
 
+.message-attachment-audio {
+  display: grid;
+  gap: var(--spacing-sm);
+}
+
+.message-attachment-audio audio {
+  width: min(100%, 18rem);
+}
+
 .message-status {
   font-size: 0.875rem;
 }
@@ -448,8 +457,57 @@ main {
   align-self: flex-start;
 }
 
+.composer-voice-button {
+  align-self: flex-start;
+}
+
 .attachment-previews {
   display: grid;
+  gap: var(--spacing-sm);
+}
+
+.voice-memo-panel {
+  display: grid;
+  gap: var(--spacing-sm);
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg);
+}
+
+.voice-memo-recording,
+.voice-memo-preview {
+  display: grid;
+  gap: var(--spacing-sm);
+}
+
+.voice-memo-recording {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.voice-memo-pulse {
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 50%;
+  background-color: var(--color-error);
+  box-shadow: 0 0 0 rgba(180, 35, 24, 0.4);
+  animation: voice-memo-pulse 1.4s ease-out infinite;
+}
+
+.voice-memo-elapsed,
+.voice-memo-preview-summary {
+  font-weight: 700;
+}
+
+.voice-memo-preview audio,
+.attachment-preview-audio {
+  width: min(100%, 20rem);
+}
+
+.voice-memo-actions {
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--spacing-sm);
 }
 
@@ -547,6 +605,23 @@ footer p {
   color: var(--color-text-muted);
   font-size: 0.9375rem;
   text-align: center;
+}
+
+@keyframes voice-memo-pulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(180, 35, 24, 0.45);
+  }
+
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0.625rem rgba(180, 35, 24, 0);
+  }
+
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(180, 35, 24, 0);
+  }
 }
 
 @media (min-width: 48rem) {

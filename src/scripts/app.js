@@ -19,10 +19,12 @@ const WORKER_BASE_ORIGIN = new URL(WORKER_BASE_URL).origin;
 const MAX_STORED_MESSAGES = 200;
 const MAX_ATTACHMENT_COUNT = 5;
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const MAX_VOICE_MEMO_DURATION_MS = 5 * 60 * 1000;
 const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 const SERVICE_WORKER_PATH = "sw.js";
 const ATTACHMENT_DOWNLOAD_URLS = new Map();
+const VOICE_MEMO_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
 let fallbackMessageCounter = 0;
 let fallbackAttachmentCounter = 0;
 
@@ -45,9 +47,11 @@ function initChatApp() {
     ),
     pollTimer: 0,
     queueRetryTimer: 0,
+    voiceMemo: createVoiceMemoState(),
   };
 
   hydrateSetupForm(elements);
+  initializeVoiceMemo(elements, state);
   renderStoredMessages(elements);
   renderQueuedMessages(elements);
   renderPendingAttachments(elements, state);
@@ -224,6 +228,17 @@ function getAppElements() {
     sendButton: document.getElementById("send-button"),
     setupForm: document.getElementById("setup-form"),
     setupPanel: document.getElementById("setup-panel"),
+    voiceMemoAttachButton: document.getElementById("voice-memo-attach"),
+    voiceMemoAudio: document.getElementById("voice-memo-audio"),
+    voiceMemoButton: document.getElementById("voice-memo-button"),
+    voiceMemoButtonText: document.getElementById("voice-memo-button-text"),
+    voiceMemoElapsed: document.getElementById("voice-memo-elapsed"),
+    voiceMemoPanel: document.getElementById("voice-memo-panel"),
+    voiceMemoPreview: document.getElementById("voice-memo-preview"),
+    voiceMemoPreviewSummary: document.getElementById("voice-memo-preview-summary"),
+    voiceMemoRecording: document.getElementById("voice-memo-recording"),
+    voiceMemoRerecordButton: document.getElementById("voice-memo-rerecord"),
+    voiceMemoStatus: document.getElementById("voice-memo-status"),
     workerUrl: document.getElementById("worker-url"),
   };
 }
@@ -251,10 +266,26 @@ function refreshComposerControls(elements, state) {
     (attachment) => attachment.status === "uploading",
   );
   const canAddMoreAttachments = state.composerAttachments.length < MAX_ATTACHMENT_COUNT;
+  const isRecordingVoiceMemo = state.voiceMemo.isRecording;
 
-  elements.attachmentButton.disabled = !hasAuth || !canAddMoreAttachments;
-  elements.attachmentInput.disabled = !hasAuth || !canAddMoreAttachments;
-  elements.sendButton.disabled = !hasAuth || hasUploadingAttachment;
+  elements.attachmentButton.disabled = !hasAuth || !canAddMoreAttachments || isRecordingVoiceMemo;
+  elements.attachmentInput.disabled = !hasAuth || !canAddMoreAttachments || isRecordingVoiceMemo;
+  elements.sendButton.disabled = !hasAuth || hasUploadingAttachment || isRecordingVoiceMemo;
+
+  if (elements.voiceMemoButton) {
+    elements.voiceMemoButton.disabled =
+      !state.voiceMemo.isSupported ||
+      !hasAuth ||
+      (!canAddMoreAttachments && !isRecordingVoiceMemo);
+  }
+
+  if (elements.voiceMemoAttachButton) {
+    elements.voiceMemoAttachButton.disabled =
+      !hasAuth ||
+      !state.voiceMemo.recordedBlob ||
+      !canAddMoreAttachments ||
+      isRecordingVoiceMemo;
+  }
 }
 
 async function handleAttachmentSelection(files, elements, state) {
@@ -291,7 +322,7 @@ async function handleAttachmentSelection(files, elements, state) {
 
 function validateAttachmentFile(file) {
   if (!file?.type || !isAllowedAttachmentContentType(file.type)) {
-    return `${file?.name || "This file"} is not a supported image, PDF, or text file.`;
+    return `${file?.name || "This file"} is not a supported image, PDF, text file, or audio clip.`;
   }
 
   if (file.size > MAX_ATTACHMENT_BYTES) {
@@ -306,6 +337,7 @@ function isAllowedAttachmentContentType(contentType) {
 
   return (
     normalized === "application/pdf" ||
+    normalized.startsWith("audio/") ||
     normalized.startsWith("image/") ||
     normalized.startsWith("text/")
   );
@@ -442,6 +474,10 @@ function uploadAttachmentFile(uploadUrl, file, onProgress, attachment) {
 }
 
 function createAttachmentPreview(file, contentType) {
+  if (contentType.startsWith("audio/")) {
+    return Promise.resolve(URL.createObjectURL(file));
+  }
+
   if (!contentType.startsWith("image/")) {
     return Promise.resolve(null);
   }
@@ -516,11 +552,20 @@ function renderPendingAttachments(elements, state) {
     article.append(header);
 
     if (attachment.previewUrl) {
-      const preview = document.createElement("img");
-      preview.alt = `Preview of ${attachment.name}`;
-      preview.className = "attachment-preview-image";
-      preview.src = attachment.previewUrl;
-      article.append(preview);
+      if (attachment.contentType.startsWith("audio/")) {
+        const audio = document.createElement("audio");
+        audio.className = "attachment-preview-audio";
+        audio.controls = true;
+        audio.preload = "metadata";
+        audio.src = attachment.previewUrl;
+        article.append(audio);
+      } else {
+        const preview = document.createElement("img");
+        preview.alt = `Preview of ${attachment.name}`;
+        preview.className = "attachment-preview-image";
+        preview.src = attachment.previewUrl;
+        article.append(preview);
+      }
     }
 
     const status = document.createElement("p");
@@ -1139,6 +1184,35 @@ function createMessageAttachments(elements, attachments) {
       if (!imageUrl && attachment.key) {
         void hydrateAttachmentLink(elements, attachment.key, link, image);
       }
+    } else if (attachment.contentType.startsWith("audio/")) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "message-attachment-audio";
+
+      const audio = document.createElement("audio");
+      audio.controls = true;
+      audio.preload = "metadata";
+      audio.hidden = !imageUrl && !linkUrl;
+
+      if (imageUrl || linkUrl) {
+        audio.src = imageUrl || linkUrl;
+      }
+
+      const link = document.createElement("a");
+      link.className = "message-attachment-link";
+      link.rel = "noopener noreferrer";
+      link.target = "_blank";
+      link.textContent = name;
+
+      if (linkUrl) {
+        link.href = linkUrl;
+      }
+
+      wrapper.append(audio, link);
+      item.append(wrapper);
+
+      if (attachment.key) {
+        void hydrateAttachmentLink(elements, attachment.key, link, null, audio);
+      }
     } else if (linkUrl) {
       const link = document.createElement("a");
       link.className = "message-attachment-link";
@@ -1164,7 +1238,7 @@ function createMessageAttachments(elements, attachments) {
   return list;
 }
 
-async function hydrateAttachmentLink(elements, key, target, imageElement) {
+async function hydrateAttachmentLink(elements, key, target, imageElement, audioElement) {
   try {
     const downloadUrl = await getAttachmentDownloadUrl(key);
 
@@ -1184,9 +1258,337 @@ async function hydrateAttachmentLink(elements, key, target, imageElement) {
       imageElement.src = downloadUrl;
       imageElement.hidden = false;
     }
+
+    if (audioElement) {
+      audioElement.src = downloadUrl;
+      audioElement.hidden = false;
+    }
   } catch {
     announce(elements, "An attachment preview could not be loaded.");
   }
+}
+
+function createVoiceMemoState() {
+  return {
+    chunks: [],
+    isRecording: false,
+    isSupported: false,
+    maxDurationTimerId: 0,
+    mimeType: "",
+    previewUrl: "",
+    recordedBlob: null,
+    recorder: null,
+    startedAt: 0,
+    stopReason: "",
+    stream: null,
+    timerId: 0,
+    durationMs: 0,
+  };
+}
+
+function initializeVoiceMemo(elements, state) {
+  if (!elements.voiceMemoButton || !elements.voiceMemoPanel) {
+    return;
+  }
+
+  state.voiceMemo.isSupported = supportsVoiceMemoRecording();
+  elements.voiceMemoButton.hidden = !state.voiceMemo.isSupported;
+  elements.voiceMemoButton.classList.toggle("is-hidden", !state.voiceMemo.isSupported);
+
+  if (!state.voiceMemo.isSupported) {
+    renderVoiceMemoState(elements, state);
+    return;
+  }
+
+  elements.voiceMemoButton.addEventListener("click", () => {
+    if (state.voiceMemo.isRecording) {
+      stopVoiceMemoRecording(elements, state);
+      return;
+    }
+
+    void startVoiceMemoRecording(elements, state);
+  });
+
+  elements.voiceMemoRerecordButton.addEventListener("click", () => {
+    void restartVoiceMemoRecording(elements, state);
+  });
+
+  elements.voiceMemoAttachButton.addEventListener("click", () => {
+    void attachVoiceMemo(elements, state);
+  });
+
+  renderVoiceMemoState(elements, state);
+}
+
+function supportsVoiceMemoRecording() {
+  return (
+    typeof globalThis.MediaRecorder === "function" &&
+    typeof navigator.mediaDevices?.getUserMedia === "function"
+  );
+}
+
+function getSupportedVoiceMemoMimeType() {
+  if (typeof globalThis.MediaRecorder?.isTypeSupported !== "function") {
+    return VOICE_MEMO_MIME_TYPES[0];
+  }
+
+  return VOICE_MEMO_MIME_TYPES.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) || "";
+}
+
+async function startVoiceMemoRecording(elements, state) {
+  if (!getStorageItem(STORAGE_KEYS.auth)) {
+    toggleSetupPanel(elements, true);
+    showFlashMessage(elements, "Save your passphrase before recording a voice memo.", true);
+    elements.passphrase.focus();
+    return;
+  }
+
+  if (state.composerAttachments.length >= MAX_ATTACHMENT_COUNT) {
+    showFlashMessage(
+      elements,
+      `You can attach up to ${MAX_ATTACHMENT_COUNT} files per message.`,
+      true,
+    );
+    return;
+  }
+
+  clearVoiceMemoPreview(state);
+
+  const mimeType = getSupportedVoiceMemoMimeType();
+  let stream;
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (error) {
+    handleVoiceMemoPermissionError(elements, error);
+    return;
+  }
+
+  let recorder;
+
+  try {
+    recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+  } catch {
+    stopVoiceMemoStream(stream);
+    showFlashMessage(elements, "Voice memo recording is not available in this browser.", true);
+    return;
+  }
+
+  state.voiceMemo.chunks = [];
+  state.voiceMemo.durationMs = 0;
+  state.voiceMemo.isRecording = true;
+  state.voiceMemo.mimeType = mimeType || normalizeAttachmentContentType(recorder.mimeType || "audio/webm");
+  state.voiceMemo.previewUrl = "";
+  state.voiceMemo.recordedBlob = null;
+  state.voiceMemo.recorder = recorder;
+  state.voiceMemo.startedAt = Date.now();
+  state.voiceMemo.stopReason = "";
+  state.voiceMemo.stream = stream;
+
+  recorder.addEventListener("dataavailable", (event) => {
+    if (event.data?.size) {
+      state.voiceMemo.chunks.push(event.data);
+    }
+  });
+
+  recorder.addEventListener("stop", () => {
+    void finalizeVoiceMemoRecording(elements, state);
+  });
+
+  recorder.start();
+  state.voiceMemo.timerId = window.setInterval(() => {
+    state.voiceMemo.durationMs = Date.now() - state.voiceMemo.startedAt;
+    renderVoiceMemoState(elements, state);
+  }, 250);
+  state.voiceMemo.maxDurationTimerId = window.setTimeout(() => {
+    state.voiceMemo.stopReason = "max-duration";
+    stopVoiceMemoRecording(elements, state);
+  }, MAX_VOICE_MEMO_DURATION_MS);
+
+  renderVoiceMemoState(elements, state);
+  refreshComposerControls(elements, state);
+  announceVoiceMemo(elements, "Voice memo recording started.");
+}
+
+function stopVoiceMemoRecording(elements, state) {
+  const { recorder } = state.voiceMemo;
+
+  if (!state.voiceMemo.isRecording || !recorder) {
+    return;
+  }
+
+  state.voiceMemo.isRecording = false;
+  state.voiceMemo.durationMs = Date.now() - state.voiceMemo.startedAt;
+  clearVoiceMemoTimers(state);
+  renderVoiceMemoState(elements, state);
+  refreshComposerControls(elements, state);
+
+  if (recorder.state !== "inactive") {
+    recorder.stop();
+  }
+}
+
+async function finalizeVoiceMemoRecording(elements, state) {
+  const mimeType = normalizeAttachmentContentType(
+    state.voiceMemo.recorder?.mimeType || state.voiceMemo.mimeType || "audio/webm",
+  );
+  const blob = new Blob(state.voiceMemo.chunks, {
+    type: mimeType || "audio/webm",
+  });
+
+  stopVoiceMemoStream(state.voiceMemo.stream);
+  state.voiceMemo.chunks = [];
+  state.voiceMemo.recorder = null;
+  state.voiceMemo.stream = null;
+
+  if (!blob.size) {
+    state.voiceMemo.mimeType = "";
+    state.voiceMemo.recordedBlob = null;
+    state.voiceMemo.durationMs = 0;
+    renderVoiceMemoState(elements, state);
+    refreshComposerControls(elements, state);
+    showFlashMessage(elements, "The voice memo could not be recorded. Please try again.", true);
+    return;
+  }
+
+  clearVoiceMemoPreview(state);
+  state.voiceMemo.mimeType = mimeType || "audio/webm";
+  state.voiceMemo.previewUrl = URL.createObjectURL(blob);
+  state.voiceMemo.recordedBlob = blob;
+  renderVoiceMemoState(elements, state);
+  refreshComposerControls(elements, state);
+
+  if (state.voiceMemo.stopReason === "max-duration") {
+    showFlashMessage(elements, "Voice memo stopped after 5 minutes.");
+    announceVoiceMemo(elements, "Voice memo stopped after 5 minutes.");
+    return;
+  }
+
+  announceVoiceMemo(elements, "Voice memo recording stopped.");
+}
+
+async function restartVoiceMemoRecording(elements, state) {
+  clearVoiceMemoPreview(state);
+  renderVoiceMemoState(elements, state);
+  refreshComposerControls(elements, state);
+  await startVoiceMemoRecording(elements, state);
+}
+
+async function attachVoiceMemo(elements, state) {
+  if (!state.voiceMemo.recordedBlob) {
+    return;
+  }
+
+  if (state.composerAttachments.length >= MAX_ATTACHMENT_COUNT) {
+    showFlashMessage(
+      elements,
+      `You can attach up to ${MAX_ATTACHMENT_COUNT} files per message.`,
+      true,
+    );
+    return;
+  }
+
+  const file = createVoiceMemoFile(state.voiceMemo.recordedBlob, state.voiceMemo.mimeType);
+  clearVoiceMemoPreview(state);
+  renderVoiceMemoState(elements, state);
+  refreshComposerControls(elements, state);
+  announceVoiceMemo(elements, "Voice memo attached.");
+  await handleAttachmentSelection([file], elements, state);
+}
+
+function createVoiceMemoFile(blob, mimeType) {
+  const contentType = normalizeAttachmentContentType(mimeType) || "audio/webm";
+  const extension = contentType === "audio/mp4" ? "mp4" : "webm";
+  const timestamp = new Date().toISOString().replaceAll(":", "-");
+
+  return new File([blob], `voice-memo-${timestamp}.${extension}`, {
+    type: contentType,
+  });
+}
+
+function clearVoiceMemoPreview(state) {
+  if (state.voiceMemo.previewUrl) {
+    URL.revokeObjectURL(state.voiceMemo.previewUrl);
+  }
+
+  state.voiceMemo.previewUrl = "";
+  state.voiceMemo.recordedBlob = null;
+  state.voiceMemo.durationMs = 0;
+  state.voiceMemo.stopReason = "";
+}
+
+function clearVoiceMemoTimers(state) {
+  if (state.voiceMemo.timerId) {
+    window.clearInterval(state.voiceMemo.timerId);
+    state.voiceMemo.timerId = 0;
+  }
+
+  if (state.voiceMemo.maxDurationTimerId) {
+    window.clearTimeout(state.voiceMemo.maxDurationTimerId);
+    state.voiceMemo.maxDurationTimerId = 0;
+  }
+}
+
+function stopVoiceMemoStream(stream) {
+  stream?.getTracks?.().forEach((track) => track.stop());
+}
+
+function handleVoiceMemoPermissionError(elements, error) {
+  if (error?.name === "NotAllowedError" || error?.name === "PermissionDeniedError") {
+    showFlashMessage(
+      elements,
+      "Microphone access was denied. Allow microphone access in your browser's site settings to record a voice memo.",
+      true,
+    );
+    announceVoiceMemo(elements, "Microphone access was denied.");
+    return;
+  }
+
+  showFlashMessage(elements, "The microphone could not be started. Please try again.", true);
+}
+
+function renderVoiceMemoState(elements, state) {
+  if (!elements.voiceMemoPanel || !elements.voiceMemoButton) {
+    return;
+  }
+
+  const hasPreview = Boolean(state.voiceMemo.previewUrl);
+  const isVisible = state.voiceMemo.isRecording || hasPreview;
+  elements.voiceMemoPanel.classList.toggle("is-hidden", !isVisible);
+  elements.voiceMemoRecording.classList.toggle("is-hidden", !state.voiceMemo.isRecording);
+  elements.voiceMemoPreview.classList.toggle("is-hidden", !hasPreview);
+  elements.voiceMemoButton.setAttribute("aria-pressed", String(state.voiceMemo.isRecording));
+  elements.voiceMemoButtonText.textContent = state.voiceMemo.isRecording
+    ? "Stop"
+    : hasPreview
+      ? "Record again"
+      : "Record";
+  elements.voiceMemoElapsed.textContent = `Recording… ${formatElapsedTime(state.voiceMemo.durationMs)}`;
+
+  if (hasPreview) {
+    elements.voiceMemoAudio.src = state.voiceMemo.previewUrl;
+    elements.voiceMemoPreviewSummary.textContent = `Voice memo ready · ${formatElapsedTime(state.voiceMemo.durationMs)}`;
+  } else if (elements.voiceMemoAudio.hasAttribute("src")) {
+    elements.voiceMemoAudio.removeAttribute("src");
+    elements.voiceMemoAudio.load();
+    elements.voiceMemoPreviewSummary.textContent = "Voice memo ready.";
+  } else {
+    elements.voiceMemoPreviewSummary.textContent = "Voice memo ready.";
+  }
+}
+
+function announceVoiceMemo(elements, message) {
+  if (elements.voiceMemoStatus) {
+    elements.voiceMemoStatus.textContent = message;
+  }
+}
+
+function formatElapsedTime(durationMs) {
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 async function getAttachmentDownloadUrl(key) {

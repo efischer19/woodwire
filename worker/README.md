@@ -150,19 +150,23 @@ Reserves a pre-signed S3 upload URL for an attachment.
 
 **Auth:** Required
 
-**Current status:** Returns `501 Not Implemented` in this ticket. Ticket 07
-adds the implementation.
-
-**Planned request body**
+**Request body**
 
 ```json
 {
   "filename": "photo.png",
-  "contentType": "image/png"
+  "contentType": "image/png",
+  "sizeBytes": 1048576
 }
 ```
 
-**Planned success response**
+`sizeBytes` is optional but recommended so the Worker can reject uploads larger
+than 25 MB before issuing a URL. If `sizeBytes` is omitted, the Worker still
+validates the filename and `contentType` but cannot perform the 25 MB preflight
+size check. Allowed MIME types are `image/*`, `audio/*`, `text/*`, and
+`application/pdf`.
+
+**Success response**
 
 ```json
 {
@@ -170,6 +174,10 @@ adds the implementation.
   "key": "attachments/conversation-123/1719758400-uuid4.png"
 }
 ```
+
+The returned `uploadUrl` is a single-use-style pre-signed `PUT` URL for the
+exact `key` above. It expires in 5 minutes, and the signed request binds the
+object to the server-generated S3 key plus the declared `Content-Type`.
 
 ### `GET /api/status/:conversationId`
 
@@ -201,10 +209,7 @@ Returns response content or a pre-signed download URL for bot output.
 
 **Auth:** Required
 
-**Current status:** Returns `501 Not Implemented` in this ticket. Ticket 07
-adds the implementation.
-
-**Planned success response**
+**Success response**
 
 ```json
 {
@@ -212,6 +217,10 @@ adds the implementation.
   "key": "outbox/9f4fd2aa-6f7d-4e3a-9564-c6470cbaad37/1719758400-response.md"
 }
 ```
+
+The Worker lists `outbox/{conversationId}/`, ignores the
+`processing.json` marker, and returns a pre-signed `GET` URL for the first
+completed object it finds. Download URLs expire in 15 minutes.
 
 ## Error Codes
 
@@ -222,9 +231,9 @@ adds the implementation.
 | `403` | Browser `Origin` does not match `PWA_ORIGIN` | `{"error":"Forbidden"}` |
 | `404` | Unknown endpoint | `{"error":"Not Found"}` |
 | `405` | Unsupported HTTP method | `{"error":"Method Not Allowed"}` |
+| `413` | Requested attachment exceeds the 25 MB Worker upload limit | `{"error":"Attachments must be 25 MB or smaller"}` |
 | `429` | Rate limit exceeded for the source IP | `{"error":"Too Many Requests"}` |
 | `500` | Required Worker configuration is missing | `{"error":"Internal Server Error"}` |
-| `501` | Contract endpoint reserved for a later ticket | `{"error":"Not Implemented","message":"..."}` |
 | `502` | AWS SQS or S3 call failed | `{"error":"Bad Gateway"}` |
 
 ## Local Commands

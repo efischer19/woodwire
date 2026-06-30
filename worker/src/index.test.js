@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 
 import { createWorker } from './index.js';
 
@@ -235,6 +236,148 @@ describe('Woodwire Worker', () => {
       conversationId: 'conversation-999',
       status: 'processing',
     });
+  });
+
+  test('generates a pre-signed upload URL with a scoped S3 key and content type', async () => {
+    const signS3Url = vi.fn().mockResolvedValue('https://uploads.example.com/presigned-put');
+    const worker = createWorker({
+      createS3Client: () => ({
+        send: vi.fn(),
+      }),
+      now: () => 1_719_758_400_000,
+      signS3Url,
+    });
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('conversation-123')
+      .mockReturnValueOnce('object-456');
+
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/upload-url', {
+        body: JSON.stringify({
+          contentType: 'image/png',
+          filename: 'photo.png',
+          sizeBytes: 1_024,
+        }),
+        headers: {
+          'content-type': 'application/json',
+          'X-Woodwire-Auth': baseEnv.WOODWIRE_AUTH,
+        },
+        method: 'POST',
+      }),
+      baseEnv,
+      {},
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      key: 'attachments/conversation-123/1719758400000-object-456.png',
+      uploadUrl: 'https://uploads.example.com/presigned-put',
+    });
+    expect(signS3Url).toHaveBeenCalledTimes(1);
+    expect(signS3Url.mock.calls[0][1]).toBeInstanceOf(PutObjectCommand);
+    expect(signS3Url.mock.calls[0][1].input).toEqual({
+      Bucket: baseEnv.CHAT_BUCKET_NAME,
+      ContentType: 'image/png',
+      Key: 'attachments/conversation-123/1719758400000-object-456.png',
+    });
+    expect(signS3Url.mock.calls[0][2]).toEqual({ expiresIn: 300 });
+  });
+
+  test('rejects oversized upload reservations before generating a URL', async () => {
+    const signS3Url = vi.fn();
+    const worker = createWorker({
+      signS3Url,
+    });
+
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/upload-url', {
+        body: JSON.stringify({
+          contentType: 'audio/mpeg',
+          filename: 'voice-note.mp3',
+          sizeBytes: 26 * 1024 * 1024,
+        }),
+        headers: {
+          'content-type': 'application/json',
+          'X-Woodwire-Auth': baseEnv.WOODWIRE_AUTH,
+        },
+        method: 'POST',
+      }),
+      baseEnv,
+      {},
+    );
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({
+      error: 'Attachments must be 25 MB or smaller',
+    });
+    expect(signS3Url).not.toHaveBeenCalled();
+  });
+
+  test('rejects disallowed upload content types', async () => {
+    const signS3Url = vi.fn();
+    const worker = createWorker({
+      signS3Url,
+    });
+
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/upload-url', {
+        body: JSON.stringify({
+          contentType: 'application/x-msdownload',
+          filename: 'payload.exe',
+        }),
+        headers: {
+          'content-type': 'application/json',
+          'X-Woodwire-Auth': baseEnv.WOODWIRE_AUTH,
+        },
+        method: 'POST',
+      }),
+      baseEnv,
+      {},
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: 'Field "contentType" is not allowed',
+    });
+    expect(signS3Url).not.toHaveBeenCalled();
+  });
+
+  test('returns a pre-signed download URL for a completed response object', async () => {
+    const signS3Url = vi.fn().mockResolvedValue('https://downloads.example.com/presigned-get');
+    const s3Send = vi.fn().mockResolvedValue({
+      Contents: [{ Key: 'outbox/conversation-123/1719758400000-response.mp3' }],
+    });
+    const worker = createWorker({
+      createS3Client: () => ({
+        send: s3Send,
+      }),
+      signS3Url,
+    });
+
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/response/conversation-123', {
+        headers: {
+          'X-Woodwire-Auth': baseEnv.WOODWIRE_AUTH,
+        },
+        method: 'GET',
+      }),
+      baseEnv,
+      {},
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      downloadUrl: 'https://downloads.example.com/presigned-get',
+      key: 'outbox/conversation-123/1719758400000-response.mp3',
+    });
+    expect(s3Send).toHaveBeenCalledTimes(1);
+    expect(signS3Url).toHaveBeenCalledTimes(1);
+    expect(signS3Url.mock.calls[0][1]).toBeInstanceOf(GetObjectCommand);
+    expect(signS3Url.mock.calls[0][1].input).toEqual({
+      Bucket: baseEnv.CHAT_BUCKET_NAME,
+      Key: 'outbox/conversation-123/1719758400000-response.mp3',
+    });
+    expect(signS3Url.mock.calls[0][2]).toEqual({ expiresIn: 900 });
   });
 
   test('rejects browser requests from non-PWA origins', async () => {

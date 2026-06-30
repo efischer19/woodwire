@@ -1,0 +1,78 @@
+name: Deploy to AWS (S3 + CloudFront)
+
+# This workflow is disabled by default. It is triggered only via manual dispatch.
+# To enable automated deployments on push to main, add a `push` trigger below.
+# See the "Opting into AWS Deployment" section of the README for setup instructions.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: aws-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to S3 and invalidate CloudFront
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-session-name: GitHubActions-DeployAWS-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      # Optional build step (for frameworks or bundlers):
+      # - name: Set up Node.js
+      #   uses: actions/setup-node@v4
+      #   with:
+      #     node-version: 20
+      # - name: Install dependencies
+      #   run: npm ci
+      # - name: Build site
+      #   run: npm run build
+      # Then update the S3 sync source path below (e.g., dist/ instead of src/).
+
+      - name: Sync site to S3
+        run: |
+          echo "🚀 Syncing site to s3://${{ vars.S3_BUCKET_NAME }}/"
+
+          aws s3 sync src/ s3://${{ vars.S3_BUCKET_NAME }}/ \
+            --delete \
+            --cache-control "public, max-age=3600"
+          # Tip: adjust --cache-control per file type (e.g. shorter TTL for HTML,
+          # longer for versioned assets). See AWS S3 sync docs for --include/--exclude.
+
+          echo "✅ Site synced successfully"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          echo "🔄 Creating CloudFront invalidation for distribution: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}"
+
+          INVALIDATION_ID=$(aws cloudfront create-invalidation \
+            --distribution-id "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}" \
+            --paths "/*" \
+            --query 'Invalidation.Id' \
+            --output text)
+
+          echo "✅ Invalidation created: $INVALIDATION_ID"
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "## AWS Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| :---- | :---- |" >> $GITHUB_STEP_SUMMARY
+          echo "| Bucket | \`s3://${{ vars.S3_BUCKET_NAME }}/\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Distribution | \`${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Triggered by | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY

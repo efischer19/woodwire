@@ -1,0 +1,41 @@
+site_name: "{{PROJECT_NAME}} Documentation"
+site_description: "Documentation for {{PROJECT_NAME}}"
+site_url: "https://{{GITHUB_OWNER}}.github.io/{{PROJECT_NAME}}/"
+docs_dir: docs-src
+
+theme:
+  name: material
+  palette:
+    primary: blue
+    accent: orange
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - search.suggest
+    - search.highlight
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Development:
+      - Contributing: CONTRIBUTING.md
+      - Development Philosophy: DEVELOPMENT_PHILOSOPHY.md
+      - Feature Request Automation: feature-request-automation.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: "https://github.com/{{GITHUB_OWNER}}/{{PROJECT_NAME}}"

@@ -1,0 +1,18 @@
+# markdownlint-cli2 configuration
+# https://github.com/DavidAnson/markdownlint-cli2
+
+config:
+  # Disable line length rule — documentation-heavy repos benefit from
+  # prose-style paragraphs rather than hard-wrapped lines
+  MD013: false
+
+  # Allow bare URLs — common in attribution and reference sections
+  MD034: false
+
+  # Allow multiple top-level headings — some documents use multiple
+  # H1 sections by design (e.g., philosophy docs)
+  MD025: false
+
+  # Allow duplicate headings in different sections (e.g., Pros/Cons)
+  MD024:
+    siblings_only: true

@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality-checks:
+    name: Quality Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python (for pre-commit)
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Run pre-commit hooks
+        uses: pre-commit/action@v3.0.1
+
+  check-adr-status:
+    name: Check ADR Status
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Check for un-accepted ADRs
+        run: |
+          echo "🔍 Checking ADR status in meta/adr/ directory..."
+
+          # Check if ADR directory exists
+          if [ ! -d "meta/adr" ]; then
+            echo "✅ No ADR directory found, check passed"
+            exit 0
+          fi
+
+          # Function to extract status from ADR file
+          get_adr_status() {
+            local file="$1"
+            awk '/^---$/{flag++; next} flag==1 && /^status:/ {gsub(/^status: *"?/, ""); gsub(/"$/, ""); print; exit}' "$file"
+          }
+
+          # Track if any proposed ADRs are found
+          found_proposed=false
+
+          # Check all ADR files
+          for adr_file in meta/adr/*.md; do
+            if [[ -f "$adr_file" && "$(basename "$adr_file")" != "TEMPLATE.md" ]]; then
+              filename=$(basename "$adr_file")
+              status=$(get_adr_status "$adr_file")
+
+              echo "📄 $filename: status='$status'"
+
+              if [[ "$status" == "Proposed" ]]; then
+                echo "❌ ERROR: Found ADR with 'Proposed' status: $filename"
+                echo "   ADRs must be accepted before merging to main branch"
+                found_proposed=true
+              elif [[ "$status" == "Accepted" || "$status" == "Deprecated" || "$status" == "Superseded"* ]]; then
+                echo "   ✅ Valid status"
+              else
+                echo "   ⚠️  Warning: Unknown status '$status' in $filename"
+              fi
+            fi
+          done
+
+          if [[ "$found_proposed" == "true" ]]; then
+            echo
+            echo "❌ CI FAILURE: Found ADRs with 'Proposed' status"
+            echo "   Please use the 'Accept Proposed ADRs' workflow to accept them"
+            echo "   or change their status to 'Accepted' before merging"
+            exit 1
+          else
+            echo
+            echo "✅ All ADRs have valid status - check passed"
+          fi
+
+  markdown-lint:
+    name: Markdown Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Lint Markdown files
+        uses: DavidAnson/markdownlint-cli2-action@v23
+        with:
+          globs: |
+            **/*.md

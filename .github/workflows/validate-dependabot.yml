@@ -1,0 +1,45 @@
+---
+name: Validate Dependabot Configuration
+
+on:
+  schedule:
+    # Run weekly on Mondays at 9 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch: # Allow manual triggering
+  pull_request:
+    paths:
+      - '.github/dependabot.yml'
+      - '.github/workflows/validate-dependabot.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-dependabot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Validate dependabot.yml structure
+        run: |
+          echo "=== Dependabot Configuration Validation ==="
+
+          if [ ! -f ".github/dependabot.yml" ]; then
+            echo "❌ ERROR: .github/dependabot.yml not found"
+            exit 1
+          fi
+
+          echo "✅ .github/dependabot.yml exists"
+
+          # Verify github-actions ecosystem is configured
+          if grep -q 'package-ecosystem: "github-actions"' .github/dependabot.yml; then
+            echo "✅ GitHub Actions ecosystem monitoring is configured"
+          else
+            echo "❌ ERROR: GitHub Actions ecosystem monitoring is not configured"
+            echo "   Add a github-actions entry to .github/dependabot.yml"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ VALIDATION PASSED: Dependabot configuration is valid"

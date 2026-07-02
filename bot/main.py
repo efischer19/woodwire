@@ -29,6 +29,7 @@ INITIAL_BACKOFF_SECONDS = 1
 MAX_BACKOFF_SECONDS = 60
 PROCESSING_MARKER_KEY = "processing.json"
 TEMP_DIRECTORY_NAME = "woodwire"
+SUPPORTED_SCHEMA_VERSION = 1
 AWS_OPERATION_ERRORS = (BotoCoreError, ClientError)
 
 
@@ -164,6 +165,17 @@ class WoodwireBot:
         receipt_handle = message["ReceiptHandle"]
         payload = parse_message_body(message["Body"])
         conversation_id = read_conversation_id(payload)
+        schema_version = read_schema_version(payload)
+
+        if schema_version > SUPPORTED_SCHEMA_VERSION:
+            self.logger.warning(
+                "Message schema version %s is greater than supported version %s",
+                schema_version,
+                SUPPORTED_SCHEMA_VERSION,
+            )
+            raise ValueError(
+                f"Message schema version {schema_version} is not supported (supported: {SUPPORTED_SCHEMA_VERSION})"
+            )
 
         self.logger.info("Message received: %s", message_id)
         self.sqs_client.change_message_visibility(
@@ -422,6 +434,15 @@ def read_attachment_keys(payload: dict[str, Any]) -> list[str]:
         normalized_attachments.append(attachment.strip())
 
     return normalized_attachments
+
+
+def read_schema_version(payload: dict[str, Any]) -> int:
+    version = payload.get("schemaVersion", 1)
+
+    if not isinstance(version, int) or version < 1:
+        raise ValueError("Message schemaVersion must be a positive integer")
+
+    return version
 
 
 def build_attachment_filename(key: str, index: int) -> str:

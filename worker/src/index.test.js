@@ -90,6 +90,7 @@ describe('Woodwire Worker', () => {
     });
     expect(send).toHaveBeenCalledTimes(1);
     expect(JSON.parse(send.mock.calls[0][0].input.MessageBody)).toMatchObject({
+      schemaVersion: 1,
       attachments: ['attachments/a.txt'],
       conversationId: 'conversation-123',
       text: 'Hello Woodwire',

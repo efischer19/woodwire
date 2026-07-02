@@ -163,6 +163,7 @@ async function handleMessageRequest(request, env, dependencies) {
 
   const conversationId = crypto.randomUUID();
   const payload = {
+    schemaVersion: 1,
     attachments: body.attachments,
     conversationId,
     createdAt: new Date().toISOString(),

@@ -135,6 +135,7 @@ HTTP/1.1 202 Accepted
 
 ```json
 {
+  "schemaVersion": 1,
   "conversationId": "9f4fd2aa-6f7d-4e3a-9564-c6470cbaad37",
   "createdAt": "2026-06-30T12:00:00.000Z",
   "text": "Hello from the PWA",

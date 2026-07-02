@@ -13,9 +13,11 @@ from bot.main import (
     INITIAL_BACKOFF_SECONDS,
     LONG_POLL_WAIT_SECONDS,
     MAX_BACKOFF_SECONDS,
+    SUPPORTED_SCHEMA_VERSION,
     VISIBILITY_TIMEOUT_SECONDS,
     WoodwireBot,
     combine_message_text,
+    read_schema_version,
 )
 from bot.voice import VoiceEngineUnavailableError
 from botocore.exceptions import ClientError
@@ -337,6 +339,37 @@ class WoodwireBotTests(unittest.TestCase):
         sqs_client.change_message_visibility.assert_called_once()
         sqs_client.delete_message.assert_not_called()
 
+    def test_handle_message_rejects_unsupported_schema_version(self) -> None:
+        sqs_client = Mock()
+        s3_client = Mock()
+        logger = Mock()
+
+        bot = self.create_bot(
+            s3_client=s3_client,
+            sqs_client=sqs_client,
+            logger=logger,
+        )
+
+        message = {
+            "Body": json.dumps(
+                {
+                    "schemaVersion": 999,
+                    "attachments": [],
+                    "conversationId": "conversation-123",
+                    "createdAt": "2026-06-30T12:00:00.000Z",
+                    "text": "Hello",
+                }
+            ),
+            "MessageId": "message-123",
+            "ReceiptHandle": "receipt-123",
+        }
+
+        with self.assertRaisesRegex(ValueError, "Message schema version 999 is not supported"):
+            bot.handle_message(message)
+
+        sqs_client.delete_message.assert_not_called()
+        logger.warning.assert_called_once()
+
     def test_polling_errors_back_off_and_reset_after_success(self) -> None:
         sqs_client = Mock()
         s3_client = Mock()
@@ -371,6 +404,30 @@ class WoodwireBotTests(unittest.TestCase):
 
         self.assertEqual(sleep_calls, [INITIAL_BACKOFF_SECONDS, INITIAL_BACKOFF_SECONDS])
         self.assertLessEqual(max(sleep_calls), MAX_BACKOFF_SECONDS)
+
+    def test_read_schema_version_defaults_to_1_when_missing(self) -> None:
+        payload = {"conversationId": "conversation-123", "text": "Hello"}
+        self.assertEqual(read_schema_version(payload), 1)
+
+    def test_read_schema_version_returns_valid_version(self) -> None:
+        payload = {"schemaVersion": 1, "conversationId": "conversation-123"}
+        self.assertEqual(read_schema_version(payload), 1)
+
+    def test_read_schema_version_raises_for_invalid_type(self) -> None:
+        payload = {"schemaVersion": "1"}
+        with self.assertRaisesRegex(ValueError, "Message schemaVersion must be a positive integer"):
+            read_schema_version(payload)
+
+    def test_read_schema_version_raises_for_negative_version(self) -> None:
+        payload = {"schemaVersion": 0}
+        with self.assertRaisesRegex(ValueError, "Message schemaVersion must be a positive integer"):
+            read_schema_version(payload)
+
+    def test_read_schema_version_returns_unsupported_future_version(self) -> None:
+        payload = {"schemaVersion": 999}
+        # Function should return the version without error
+        # The unsupported version check happens in handle_message
+        self.assertEqual(read_schema_version(payload), 999)
 
 
 if __name__ == "__main__":

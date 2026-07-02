@@ -339,6 +339,60 @@ class WoodwireBotTests(unittest.TestCase):
         sqs_client.change_message_visibility.assert_called_once()
         sqs_client.delete_message.assert_not_called()
 
+    def test_processing_failure_deletes_processing_marker(self) -> None:
+        sqs_client = Mock()
+        s3_client = Mock()
+
+        class FailingBackend:
+            def process(self, _message: str, _attachments: list[str]) -> str:
+                raise ValueError("processor boom")
+
+        bot = self.create_bot(
+            ai_backend=FailingBackend(),
+            s3_client=s3_client,
+            sqs_client=sqs_client,
+        )
+
+        with self.assertRaisesRegex(ValueError, "processor boom"):
+            bot.handle_message(build_message())
+
+        # Verify delete_object was called for the processing marker
+        delete_calls = s3_client.delete_object.call_args_list
+        self.assertEqual(len(delete_calls), 1)
+        delete_args = delete_calls[0]
+        self.assertEqual(delete_args[1]["Bucket"], "woodwire-chat")
+        self.assertEqual(delete_args[1]["Key"], "outbox/conversation-123/processing.json")
+
+    def test_marker_deletion_failure_does_not_mask_original_exception(self) -> None:
+        sqs_client = Mock()
+        s3_client = Mock()
+        logger = Mock()
+
+        class FailingBackend:
+            def process(self, _message: str, _attachments: list[str]) -> str:
+                raise ValueError("processor boom")
+
+        s3_client.delete_object.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
+            "DeleteObject",
+        )
+
+        bot = self.create_bot(
+            ai_backend=FailingBackend(),
+            s3_client=s3_client,
+            sqs_client=sqs_client,
+            logger=logger,
+        )
+
+        # The original exception should be raised, not the deletion error
+        with self.assertRaisesRegex(ValueError, "processor boom"):
+            bot.handle_message(build_message())
+
+        # Verify warning was logged about marker deletion failure
+        logger.warning.assert_called()
+        warning_call_args = logger.warning.call_args[0]
+        self.assertIn("Failed to delete processing marker", warning_call_args[0])
+
     def test_handle_message_rejects_unsupported_schema_version(self) -> None:
         sqs_client = Mock()
         s3_client = Mock()

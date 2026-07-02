@@ -21,6 +21,8 @@ const UPLOAD_URL_EXPIRY_SECONDS = 5 * 60;
 // Download URLs allow a slightly longer window to accommodate slower client downloads.
 const DOWNLOAD_URL_EXPIRY_SECONDS = 15 * 60;
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+// SQS enforces a 256 KB maximum message body size
+export const MAX_SQS_MESSAGE_BYTES = 262144;
 const STATUS_CACHE_TTL_SECONDS = 3;
 const STATUS_CACHE_MIN_SECONDS = 2;
 const STATUS_CACHE_MAX_SECONDS = 5;
@@ -169,6 +171,14 @@ async function handleMessageRequest(request, env, dependencies) {
     createdAt: new Date().toISOString(),
     text: body.text,
   };
+
+  const payloadString = JSON.stringify(payload);
+  const payloadBytes = new TextEncoder().encode(payloadString).byteLength;
+
+  if (payloadBytes > MAX_SQS_MESSAGE_BYTES) {
+    return createResponse(request, env, 413, { error: 'Message payload is too large' });
+  }
+
   const sqsClient =
     dependencies.createSqsClient?.(env) ??
     new SQSClient({
@@ -179,7 +189,7 @@ async function handleMessageRequest(request, env, dependencies) {
   try {
     await sqsClient.send(
       new SendMessageCommand({
-        MessageBody: JSON.stringify(payload),
+        MessageBody: payloadString,
         QueueUrl: env.CHAT_QUEUE_URL,
       }),
     );

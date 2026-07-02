@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 
-import { createWorker } from './index.js';
+import { createWorker, MAX_SQS_MESSAGE_BYTES } from './index.js';
 
 const baseEnv = {
   AWS_REGION: 'us-east-1',
@@ -116,6 +116,92 @@ describe('Woodwire Worker', () => {
     expect(await response.json()).toEqual({
       error: 'Field "text" must be a non-empty string',
     });
+  });
+
+  test('rejects a message payload that exceeds the 256 KB SQS limit', async () => {
+    const send = vi.fn().mockResolvedValue({ MessageId: 'message-1' });
+    const worker = createWorker({
+      createSqsClient: () => ({
+        send,
+      }),
+    });
+    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('conversation-123');
+
+    // Build a payload and incrementally increase text until it exceeds the limit
+    // This ensures we test with an actual oversized payload
+    const basePayload = {
+      schemaVersion: 1,
+      conversationId: 'conversation-123',
+      createdAt: '2026-06-30T12:00:00.000Z',
+      attachments: [],
+      text: '',
+    };
+    const baseSize = new TextEncoder().encode(JSON.stringify(basePayload)).byteLength;
+    // Add enough text to exceed the limit
+    const textLength = MAX_SQS_MESSAGE_BYTES - baseSize + 1000;
+    const largeText = 'x'.repeat(textLength);
+
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/message', {
+        body: JSON.stringify({ attachments: [], text: largeText }),
+        headers: {
+          'content-type': 'application/json',
+          'X-Woodwire-Auth': baseEnv.WOODWIRE_AUTH,
+        },
+        method: 'POST',
+      }),
+      baseEnv,
+      {},
+    );
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({
+      error: 'Message payload is too large',
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  test('accepts a message payload just under the 256 KB SQS limit', async () => {
+    const send = vi.fn().mockResolvedValue({ MessageId: 'message-1' });
+    const worker = createWorker({
+      createSqsClient: () => ({
+        send,
+      }),
+    });
+    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('conversation-123');
+
+    // Build a payload just under the 256 KB limit
+    const basePayload = {
+      schemaVersion: 1,
+      conversationId: 'conversation-123',
+      createdAt: '2026-06-30T12:00:00.000Z',
+      attachments: [],
+      text: '',
+    };
+    const baseSize = new TextEncoder().encode(JSON.stringify(basePayload)).byteLength;
+    // Add text that keeps the total just under the limit
+    const textLength = MAX_SQS_MESSAGE_BYTES - baseSize - 100;
+    const text = 'x'.repeat(textLength);
+
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/message', {
+        body: JSON.stringify({ attachments: [], text }),
+        headers: {
+          'content-type': 'application/json',
+          'X-Woodwire-Auth': baseEnv.WOODWIRE_AUTH,
+        },
+        method: 'POST',
+      }),
+      baseEnv,
+      {},
+    );
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({
+      conversationId: 'conversation-123',
+      status: 'pending',
+    });
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   test('rate limits repeated authenticated requests from the same IP', async () => {

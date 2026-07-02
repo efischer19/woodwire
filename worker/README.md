@@ -236,7 +236,7 @@ expire in 15 minutes.
 | `403` | Browser `Origin` does not match `PWA_ORIGIN` | `{"error":"Forbidden"}` |
 | `404` | Unknown endpoint | `{"error":"Not Found"}` |
 | `405` | Unsupported HTTP method | `{"error":"Method Not Allowed"}` |
-| `413` | Requested attachment exceeds the 25 MB Worker upload limit, or message payload exceeds 256 KB | `{"error":"..."}` |
+| `413` | Requested attachment exceeds the 25 MB Worker upload limit, or message payload exceeds 256 KB | `{"error":"Attachments must be 25 MB or smaller"}` or `{"error":"Message payload is too large"}` |
 | `429` | Rate limit exceeded for the source IP | `{"error":"Too Many Requests"}` |
 | `500` | Required Worker configuration is missing | `{"error":"Internal Server Error"}` |
 | `502` | AWS SQS or S3 call failed | `{"error":"Bad Gateway"}` |

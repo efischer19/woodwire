@@ -118,6 +118,72 @@ describe('Woodwire Worker', () => {
     });
   });
 
+  test('rejects a message payload that exceeds the 256 KB SQS limit', async () => {
+    const send = vi.fn().mockResolvedValue({ MessageId: 'message-1' });
+    const worker = createWorker({
+      createSqsClient: () => ({
+        send,
+      }),
+    });
+    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('conversation-123');
+
+    // Create a payload that exceeds 256 KB when serialized
+    const largeText = 'x'.repeat(262145);
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/message', {
+        body: JSON.stringify({ attachments: [], text: largeText }),
+        headers: {
+          'content-type': 'application/json',
+          'X-Woodwire-Auth': baseEnv.WOODWIRE_AUTH,
+        },
+        method: 'POST',
+      }),
+      baseEnv,
+      {},
+    );
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({
+      error: 'Message payload is too large',
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  test('accepts a message payload just under the 256 KB SQS limit', async () => {
+    const send = vi.fn().mockResolvedValue({ MessageId: 'message-1' });
+    const worker = createWorker({
+      createSqsClient: () => ({
+        send,
+      }),
+    });
+    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('conversation-123');
+
+    // Create a payload that is just under 256 KB (we'll use 262000 bytes which is under 262144)
+    // We need to account for the JSON overhead of the serialized payload
+    // The minimum payload is about 114 bytes without the text, so we'll use text of ~261800 bytes
+    const textLength = 261800;
+    const text = 'x'.repeat(textLength);
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/message', {
+        body: JSON.stringify({ attachments: [], text }),
+        headers: {
+          'content-type': 'application/json',
+          'X-Woodwire-Auth': baseEnv.WOODWIRE_AUTH,
+        },
+        method: 'POST',
+      }),
+      baseEnv,
+      {},
+    );
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({
+      conversationId: 'conversation-123',
+      status: 'pending',
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
   test('rate limits repeated authenticated requests from the same IP', async () => {
     const worker = createWorker({
       createSqsClient: () => ({

@@ -127,8 +127,21 @@ describe('Woodwire Worker', () => {
     });
     vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('conversation-123');
 
-    // Create a payload that exceeds 256 KB when serialized
-    const largeText = 'x'.repeat(262145);
+    // Build a payload and incrementally increase text until it exceeds the limit
+    // This ensures we test with an actual oversized payload
+    const MAX_SQS_MESSAGE_BYTES = 262144;
+    const basePayload = {
+      schemaVersion: 1,
+      conversationId: 'conversation-123',
+      createdAt: '2026-06-30T12:00:00.000Z',
+      attachments: [],
+      text: '',
+    };
+    const baseSize = new TextEncoder().encode(JSON.stringify(basePayload)).byteLength;
+    // Add enough text to exceed the limit
+    const textLength = MAX_SQS_MESSAGE_BYTES - baseSize + 1000;
+    const largeText = 'x'.repeat(textLength);
+
     const response = await worker.fetch(
       new Request('https://worker.example.com/api/message', {
         body: JSON.stringify({ attachments: [], text: largeText }),
@@ -158,11 +171,20 @@ describe('Woodwire Worker', () => {
     });
     vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('conversation-123');
 
-    // Create a payload that is just under 256 KB (we'll use 262000 bytes which is under 262144)
-    // We need to account for the JSON overhead of the serialized payload
-    // The minimum payload is about 114 bytes without the text, so we'll use text of ~261800 bytes
-    const textLength = 261800;
+    // Build a payload just under the 256 KB limit
+    const MAX_SQS_MESSAGE_BYTES = 262144;
+    const basePayload = {
+      schemaVersion: 1,
+      conversationId: 'conversation-123',
+      createdAt: '2026-06-30T12:00:00.000Z',
+      attachments: [],
+      text: '',
+    };
+    const baseSize = new TextEncoder().encode(JSON.stringify(basePayload)).byteLength;
+    // Add text that keeps the total just under the limit
+    const textLength = MAX_SQS_MESSAGE_BYTES - baseSize - 100;
     const text = 'x'.repeat(textLength);
+
     const response = await worker.fetch(
       new Request('https://worker.example.com/api/message', {
         body: JSON.stringify({ attachments: [], text }),

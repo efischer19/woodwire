@@ -388,10 +388,13 @@ class WoodwireBotTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "processor boom"):
             bot.handle_message(build_message())
 
-        # Verify warning was logged about marker deletion failure
-        logger.warning.assert_called()
+        # Verify warning was logged exactly once about marker deletion failure
+        logger.warning.assert_called_once()
         warning_call_args = logger.warning.call_args[0]
+        # logger.warning("Failed to delete processing marker %s: %s", key, error)
+        self.assertEqual(len(warning_call_args), 3)
         self.assertIn("Failed to delete processing marker", warning_call_args[0])
+        self.assertEqual(warning_call_args[1], "outbox/conversation-123/processing.json")
 
     def test_handle_message_rejects_unsupported_schema_version(self) -> None:
         sqs_client = Mock()

@@ -16,6 +16,19 @@ Parameters:
     Type: String
     AllowedPattern: '^[A-Za-z0-9_-]{1,76}$'
     Description: Standard SQS queue name. Limited to 76 chars so the derived -dlq name stays within SQS's 80-character limit.
+  AlarmSnsTopicArn:
+    Type: String
+    Default: ''
+    Description: >-
+      Optional SNS topic ARN for dead-letter queue alarms. Leave empty to
+      create the alarm without a notification target.
+
+Conditions:
+  HasAlarmSnsTopic:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: AlarmSnsTopicArn
+          - ''
 
 Resources:
   ChatDeadLetterQueue:
@@ -42,6 +55,34 @@ Resources:
             - ChatDeadLetterQueue
             - Arn
         maxReceiveCount: 3
+
+  ChatDeadLetterQueueAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName:
+        Fn::Sub: '${ChatQueueName}-dlq-messages'
+      AlarmDescription: >-
+        One or more messages have been routed to the Woodwire dead-letter
+        queue after exhausting retries.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value:
+            Fn::GetAtt:
+              - ChatDeadLetterQueue
+              - QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        Fn::If:
+          - HasAlarmSnsTopic
+          - - Ref: AlarmSnsTopicArn
+          - Ref: AWS::NoValue
 
 Outputs:
   ChatQueueUrl:

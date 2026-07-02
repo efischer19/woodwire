@@ -250,12 +250,21 @@ class WoodwireBot:
         )
 
         self.write_processing_marker(conversation_id)
-        processed_payload = self.process_payload(conversation_id, payload, message_id)
-        response_key = self.write_response(
-            conversation_id,
-            processed_payload.response_text,
-            response_audio=processed_payload.response_audio,
-        )
+        try:
+            processed_payload = self.process_payload(conversation_id, payload, message_id)
+            response_key = self.write_response(
+                conversation_id,
+                processed_payload.response_text,
+                response_audio=processed_payload.response_audio,
+            )
+        except Exception:
+            # Delete the processing marker for any exception during payload processing or
+            # response writing. This ensures stale markers don't remain if processing fails
+            # and the message is retried. We catch Exception (not BaseException) to allow
+            # system-exiting exceptions like KeyboardInterrupt and SystemExit to propagate
+            # immediately without triggering cleanup logic.
+            self.delete_processing_marker(conversation_id)
+            raise
 
         self.sqs_client.delete_message(
             QueueUrl=self.config.sqs_queue_url,
@@ -339,6 +348,20 @@ class WoodwireBot:
             Body=body,
             ContentType="application/json",
         )
+
+    def delete_processing_marker(self, conversation_id: str) -> None:
+        key = f"outbox/{conversation_id}/{PROCESSING_MARKER_KEY}"
+        try:
+            self.s3_client.delete_object(
+                Bucket=self.config.s3_bucket_name,
+                Key=key,
+            )
+        except AWS_OPERATION_ERRORS as error:
+            self.logger.warning(
+                "Failed to delete processing marker %s: %s",
+                key,
+                error,
+            )
 
     def write_response(
         self,

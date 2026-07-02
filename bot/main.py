@@ -23,6 +23,44 @@ from bot.voice import (
 )
 from botocore.exceptions import BotoCoreError, ClientError
 
+
+class JsonFormatter(logging.Formatter):
+    """Custom formatter that outputs log records as JSON.
+    
+    This formatter emits one JSON object per log line. Each object includes:
+    - timestamp (ISO 8601 format)
+    - level (log level)
+    - logger (logger name)
+    - message (formatted log message)
+    - conversationId (if provided via extra dict)
+    - messageId (if provided via extra dict)
+    - exception (if an exception occurred)
+    
+    Structured JSON logging enables log aggregation tools (CloudWatch, journald,
+    Loki, etc.) to parse and filter logs without fragile regex patterns, which is
+    critical for debugging asynchronous failures in a distributed system.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        entry = {
+            "timestamp": self.formatTime(record, self.datefmt or "%Y-%m-%dT%H:%M:%S"),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        
+        # Add optional context fields if they were included in the extra dict
+        if hasattr(record, "conversationId"):
+            entry["conversationId"] = record.conversationId
+        if hasattr(record, "messageId"):
+            entry["messageId"] = record.messageId
+        
+        # Add exception info if present
+        if record.exc_info and record.exc_info[1]:
+            entry["exception"] = str(record.exc_info[1])
+        
+        return json.dumps(entry)
+
 LONG_POLL_WAIT_SECONDS = 20
 VISIBILITY_TIMEOUT_SECONDS = 120
 INITIAL_BACKOFF_SECONDS = 1
@@ -172,22 +210,47 @@ class WoodwireBot:
                 "Message schema version %s is greater than supported version %s",
                 schema_version,
                 SUPPORTED_SCHEMA_VERSION,
+                extra={
+                    "conversationId": conversation_id,
+                    "messageId": message_id,
+                },
             )
             raise ValueError(
                 f"Message schema version {schema_version} is not supported (supported: {SUPPORTED_SCHEMA_VERSION})"
             )
 
-        self.logger.info("Message received: %s", message_id)
+        self.logger.info(
+            "Message received: %s",
+            message_id,
+            extra={
+                "conversationId": conversation_id,
+                "messageId": message_id,
+            },
+        )
         self.sqs_client.change_message_visibility(
             QueueUrl=self.config.sqs_queue_url,
             ReceiptHandle=receipt_handle,
             VisibilityTimeout=VISIBILITY_TIMEOUT_SECONDS,
         )
-        self.logger.info("Visibility timeout extended to %s seconds", VISIBILITY_TIMEOUT_SECONDS)
-        self.logger.info("Processing started for conversation %s", conversation_id)
+        self.logger.info(
+            "Visibility timeout extended to %s seconds",
+            VISIBILITY_TIMEOUT_SECONDS,
+            extra={
+                "conversationId": conversation_id,
+                "messageId": message_id,
+            },
+        )
+        self.logger.info(
+            "Processing started for conversation %s",
+            conversation_id,
+            extra={
+                "conversationId": conversation_id,
+                "messageId": message_id,
+            },
+        )
 
         self.write_processing_marker(conversation_id)
-        processed_payload = self.process_payload(conversation_id, payload)
+        processed_payload = self.process_payload(conversation_id, payload, message_id)
         response_key = self.write_response(
             conversation_id,
             processed_payload.response_text,
@@ -198,11 +261,31 @@ class WoodwireBot:
             QueueUrl=self.config.sqs_queue_url,
             ReceiptHandle=receipt_handle,
         )
-        self.logger.info("Response written to s3://%s/%s", self.config.s3_bucket_name, response_key)
-        self.logger.info("Message deleted from queue: %s", message_id)
+        self.logger.info(
+            "Response written to s3://%s/%s",
+            self.config.s3_bucket_name,
+            response_key,
+            extra={
+                "conversationId": conversation_id,
+                "messageId": message_id,
+            },
+        )
+        self.logger.info(
+            "Message deleted from queue: %s",
+            message_id,
+            extra={
+                "conversationId": conversation_id,
+                "messageId": message_id,
+            },
+        )
         return response_key
 
-    def process_payload(self, conversation_id: str, payload: dict[str, Any]) -> ProcessedPayload:
+    def process_payload(
+        self,
+        conversation_id: str,
+        payload: dict[str, Any],
+        message_id: str = "unknown",
+    ) -> ProcessedPayload:
         message_text = read_message_text(payload, required=False)
         attachment_keys = read_attachment_keys(payload)
         temp_dir: str | None = None
@@ -221,6 +304,8 @@ class WoodwireBot:
                 message_text,
                 downloaded_attachments,
                 temp_dir,
+                conversation_id,
+                message_id,
             )
             response_text = self.ai_backend.process(
                 prompt_text,
@@ -236,12 +321,14 @@ class WoodwireBot:
                     response_text=response_text,
                     temp_dir=temp_dir,
                     enabled=voice_response_enabled,
+                    conversation_id=conversation_id,
+                    message_id=message_id,
                 ),
                 response_text=response_text,
             )
         finally:
             if temp_dir is not None:
-                self.cleanup_temp_directory(temp_dir)
+                self.cleanup_temp_directory(temp_dir, conversation_id, message_id)
 
     def write_processing_marker(self, conversation_id: str) -> None:
         key = f"outbox/{conversation_id}/{PROCESSING_MARKER_KEY}"
@@ -324,6 +411,8 @@ class WoodwireBot:
         message_text: str,
         attachments: list[DownloadedAttachment],
         temp_dir: str | None,
+        conversation_id: str = "unknown",
+        message_id: str = "unknown",
     ) -> tuple[str, bool]:
         transcript = None
         audio_attachments = [
@@ -340,6 +429,10 @@ class WoodwireBot:
                 self.logger.warning(
                     "%s; continuing with text-only processing",
                     error,
+                    extra={
+                        "conversationId": conversation_id,
+                        "messageId": message_id,
+                    },
                 )
                 voice_response_enabled = False
 
@@ -367,6 +460,8 @@ class WoodwireBot:
         temp_dir: str | None,
         *,
         enabled: bool,
+        conversation_id: str = "unknown",
+        message_id: str = "unknown",
     ) -> bytes | None:
         if not enabled or not has_audio_attachment or temp_dir is None:
             return None
@@ -374,7 +469,14 @@ class WoodwireBot:
         try:
             audio_path = self.voice_pipeline.synthesize_response(response_text, temp_dir)
         except VoiceEngineUnavailableError as error:
-            self.logger.warning("%s; skipping audio response upload", error)
+            self.logger.warning(
+                "%s; skipping audio response upload",
+                error,
+                extra={
+                    "conversationId": conversation_id,
+                    "messageId": message_id,
+                },
+            )
             return None
 
         if not audio_path:
@@ -383,11 +485,24 @@ class WoodwireBot:
         with open(audio_path, "rb") as handle:
             return handle.read()
 
-    def cleanup_temp_directory(self, temp_dir: str) -> None:
+    def cleanup_temp_directory(
+        self,
+        temp_dir: str,
+        conversation_id: str = "unknown",
+        message_id: str = "unknown",
+    ) -> None:
         try:
             shutil.rmtree(temp_dir)
         except OSError as error:
-            self.logger.warning("Failed to remove temp directory %s: %s", temp_dir, error)
+            self.logger.warning(
+                "Failed to remove temp directory %s: %s",
+                temp_dir,
+                error,
+                extra={
+                    "conversationId": conversation_id,
+                    "messageId": message_id,
+                },
+            )
 
 
 def parse_message_body(body: str) -> dict[str, Any]:
@@ -478,7 +593,17 @@ def configure_logging() -> logging.Logger:
         return logger
 
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    
+    # Support LOG_FORMAT=text env var or --human CLI arg for local development readability
+    use_text_format = os.environ.get("LOG_FORMAT") == "text" or "--human" in sys.argv
+    
+    if use_text_format:
+        # Plain-text format for local development
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    else:
+        # Structured JSON format for production
+        handler.setFormatter(JsonFormatter())
+    
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     logger.propagate = False

@@ -18,6 +18,7 @@ jobs:
       frontend: ${{ steps.frontend.outputs.frontend }}
       worker: ${{ steps.worker.outputs.worker }}
       bot: ${{ steps.bot.outputs.bot }}
+      infra: ${{ steps.infra.outputs.infra }}
     steps:
       - name: Checkout code
         if: github.event_name == 'push'
@@ -35,6 +36,8 @@ jobs:
               - 'worker/**'
             bot:
               - 'bot/**'
+            infra:
+              - 'infra/**'
 
       - name: Decide whether frontend lint should run
         id: frontend
@@ -61,6 +64,15 @@ jobs:
             echo "bot=${{ steps.filter.outputs.bot }}" >> "$GITHUB_OUTPUT"
           else
             echo "bot=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Decide whether infra lint should run
+        id: infra
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "infra=${{ steps.filter.outputs.infra }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "infra=true" >> "$GITHUB_OUTPUT"
           fi
 
   quality-checks:
@@ -210,3 +222,25 @@ jobs:
 
       - name: Run tests
         run: python -m unittest discover -s bot/tests -v
+
+  cfn-lint:
+    name: CloudFormation Lint
+    permissions:
+      contents: read
+    needs: detect-changes
+    if: needs.detect-changes.outputs.infra == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install cfn-lint
+        run: pip install cfn-lint
+
+      - name: Lint CloudFormation templates
+        run: cfn-lint infra/*.yaml

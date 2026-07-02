@@ -423,9 +423,10 @@ class WoodwireBotTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Message schemaVersion must be a positive integer"):
             read_schema_version(payload)
 
-    def test_read_schema_version_raises_for_unsupported_future_version(self) -> None:
+    def test_read_schema_version_returns_unsupported_future_version(self) -> None:
         payload = {"schemaVersion": 999}
         # Function should return the version without error
+        # The unsupported version check happens in handle_message
         self.assertEqual(read_schema_version(payload), 999)
 
 

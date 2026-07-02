@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 
-import { createWorker } from './index.js';
+import { createWorker, MAX_SQS_MESSAGE_BYTES } from './index.js';
 
 const baseEnv = {
   AWS_REGION: 'us-east-1',
@@ -129,7 +129,6 @@ describe('Woodwire Worker', () => {
 
     // Build a payload and incrementally increase text until it exceeds the limit
     // This ensures we test with an actual oversized payload
-    const MAX_SQS_MESSAGE_BYTES = 262144;
     const basePayload = {
       schemaVersion: 1,
       conversationId: 'conversation-123',
@@ -172,7 +171,6 @@ describe('Woodwire Worker', () => {
     vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('conversation-123');
 
     // Build a payload just under the 256 KB limit
-    const MAX_SQS_MESSAGE_BYTES = 262144;
     const basePayload = {
       schemaVersion: 1,
       conversationId: 'conversation-123',

@@ -26,7 +26,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 class JsonFormatter(logging.Formatter):
     """Custom formatter that outputs log records as JSON.
-    
+
     This formatter emits one JSON object per log line. Each object includes:
     - timestamp (ISO 8601 format)
     - level (log level)
@@ -35,7 +35,7 @@ class JsonFormatter(logging.Formatter):
     - conversationId (if provided via extra dict)
     - messageId (if provided via extra dict)
     - exception (if an exception occurred)
-    
+
     Structured JSON logging enables log aggregation tools (CloudWatch, journald,
     Loki, etc.) to parse and filter logs without fragile regex patterns, which is
     critical for debugging asynchronous failures in a distributed system.
@@ -48,17 +48,17 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
-        
+
         # Add optional context fields if they were included in the extra dict
         if hasattr(record, "conversationId"):
             entry["conversationId"] = record.conversationId
         if hasattr(record, "messageId"):
             entry["messageId"] = record.messageId
-        
+
         # Add exception info if present
         if record.exc_info and record.exc_info[1]:
             entry["exception"] = str(record.exc_info[1])
-        
+
         return json.dumps(entry)
 
 LONG_POLL_WAIT_SECONDS = 20
@@ -593,17 +593,17 @@ def configure_logging() -> logging.Logger:
         return logger
 
     handler = logging.StreamHandler(sys.stdout)
-    
+
     # Support LOG_FORMAT=text env var or --human CLI arg for local development readability
     use_text_format = os.environ.get("LOG_FORMAT") == "text" or "--human" in sys.argv
-    
+
     if use_text_format:
         # Plain-text format for local development
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     else:
         # Structured JSON format for production
         handler.setFormatter(JsonFormatter())
-    
+
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     logger.propagate = False

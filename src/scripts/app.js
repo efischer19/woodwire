@@ -217,6 +217,14 @@ function initChatApp() {
     announce(elements, "You are offline. Messages will be queued.");
   });
 
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      stopPollingLoop(state);
+    } else if (state.pendingConversations.size > 0) {
+      ensurePollingLoop(elements, state);
+    }
+  });
+
   if (navigator.onLine) {
     ensurePollingLoop(elements, state);
     void drainQueue(elements, state).catch(() => {

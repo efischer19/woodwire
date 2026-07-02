@@ -16,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       frontend: ${{ steps.frontend.outputs.frontend }}
+      worker: ${{ steps.worker.outputs.worker }}
+      bot: ${{ steps.bot.outputs.bot }}
     steps:
       - name: Checkout code
         if: github.event_name == 'push'
@@ -29,6 +31,10 @@ jobs:
           filters: |
             frontend:
               - 'src/**'
+            worker:
+              - 'worker/**'
+            bot:
+              - 'bot/**'
 
       - name: Decide whether frontend lint should run
         id: frontend
@@ -37,6 +43,24 @@ jobs:
             echo "frontend=${{ steps.filter.outputs.frontend }}" >> "$GITHUB_OUTPUT"
           else
             echo "frontend=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Decide whether worker tests should run
+        id: worker
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "worker=${{ steps.filter.outputs.worker }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "worker=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Decide whether bot tests should run
+        id: bot
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "bot=${{ steps.filter.outputs.bot }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "bot=true" >> "$GITHUB_OUTPUT"
           fi
 
   quality-checks:
@@ -140,3 +164,49 @@ jobs:
         with:
           globs: |
             **/*.md
+
+  worker-tests:
+    name: Worker Tests
+    permissions:
+      contents: read
+    needs: detect-changes
+    if: needs.detect-changes.outputs.worker == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: worker
+
+      - name: Run tests
+        run: npm test
+        working-directory: worker
+
+  bot-tests:
+    name: Bot Tests
+    permissions:
+      contents: read
+    needs: detect-changes
+    if: needs.detect-changes.outputs.bot == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r bot/requirements.txt
+
+      - name: Run tests
+        run: python -m unittest discover -s bot/tests -v

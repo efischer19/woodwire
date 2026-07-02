@@ -66,6 +66,13 @@ Resources:
             Status: Enabled
             Prefix: attachments/
             ExpirationInDays: 2
+          # Abort incomplete multipart uploads after 1 day. Failed presigned PUT
+          # uploads from the PWA leave orphaned parts that never expire without
+          # this rule. Applies to all prefixes (inbox/, outbox/, attachments/).
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
 
 Outputs:
   ChatBucketName:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import logging
 import os
@@ -22,6 +24,7 @@ from bot.voice import (
     normalize_content_type,
 )
 from botocore.exceptions import BotoCoreError, ClientError
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
 class JsonFormatter(logging.Formatter):
@@ -67,8 +70,10 @@ INITIAL_BACKOFF_SECONDS = 1
 MAX_BACKOFF_SECONDS = 60
 PROCESSING_MARKER_KEY = "processing.json"
 TEMP_DIRECTORY_NAME = "woodwire"
-SUPPORTED_SCHEMA_VERSION = 1
+SUPPORTED_SCHEMA_VERSION = 2
 AWS_OPERATION_ERRORS = (BotoCoreError, ClientError)
+E2EE_IV_LENGTH_BYTES = 12
+E2EE_KEY_LENGTH_BYTES = 32
 
 
 @dataclass(frozen=True)
@@ -76,6 +81,7 @@ class BotConfig:
     aws_access_key_id: str
     aws_region: str
     aws_secret_access_key: str
+    e2ee_key: bytes | None
     s3_bucket_name: str
     sqs_queue_url: str
 
@@ -99,6 +105,7 @@ class BotConfig:
             aws_access_key_id=env["AWS_ACCESS_KEY_ID"],
             aws_region=env["AWS_REGION"],
             aws_secret_access_key=env["AWS_SECRET_ACCESS_KEY"],
+            e2ee_key=parse_e2ee_key(env.get("WOODWIRE_E2EE_KEY")),
             s3_bucket_name=env["S3_BUCKET_NAME"],
             sqs_queue_url=env["SQS_QUEUE_URL"],
         )
@@ -256,6 +263,7 @@ class WoodwireBot:
                 conversation_id,
                 processed_payload.response_text,
                 response_audio=processed_payload.response_audio,
+                encrypt_output=schema_version >= 2,
             )
         except Exception:
             # Delete the processing marker for any exception during payload processing or
@@ -295,14 +303,24 @@ class WoodwireBot:
         payload: dict[str, Any],
         message_id: str = "unknown",
     ) -> ProcessedPayload:
+        schema_version = read_schema_version(payload)
         message_text = read_message_text(payload, required=False)
         attachment_keys = read_attachment_keys(payload)
         temp_dir: str | None = None
+        e2ee_key = self.require_e2ee_key(schema_version)
+
+        if schema_version >= 2 and message_text:
+            message_text = decrypt_encrypted_text(message_text, e2ee_key)
 
         try:
             if attachment_keys:
                 temp_dir = self.build_temp_directory(conversation_id)
-                downloaded_attachments = self.download_attachments(temp_dir, attachment_keys)
+                downloaded_attachments = self.download_attachments(
+                    temp_dir,
+                    attachment_keys,
+                    decrypt_audio=schema_version >= 2,
+                    e2ee_key=e2ee_key,
+                )
             else:
                 downloaded_attachments = []
 
@@ -368,23 +386,33 @@ class WoodwireBot:
         conversation_id: str,
         response_text: str,
         *,
+        encrypt_output: bool = False,
         response_audio: bytes | None = None,
     ) -> str:
         timestamp = int(self.now().timestamp())
         key_prefix = f"outbox/{conversation_id}/{timestamp}-response"
         key = f"{key_prefix}.md"
+        e2ee_key = self.require_e2ee_key(2) if encrypt_output else None
+        response_body = response_text.encode("utf-8")
+        if e2ee_key is not None:
+            response_body = encrypt_payload_bytes(response_body, e2ee_key)
         self.s3_client.put_object(
             Bucket=self.config.s3_bucket_name,
             Key=key,
-            Body=response_text.encode("utf-8"),
+            Body=response_body,
             ContentType="text/markdown; charset=utf-8",
         )
 
         if response_audio is not None:
+            audio_body = (
+                encrypt_payload_bytes(response_audio, e2ee_key)
+                if e2ee_key is not None
+                else response_audio
+            )
             self.s3_client.put_object(
                 Bucket=self.config.s3_bucket_name,
                 Key=f"{key_prefix}.mp3",
-                Body=response_audio,
+                Body=audio_body,
                 ContentType="audio/mpeg",
             )
 
@@ -399,6 +427,9 @@ class WoodwireBot:
         self,
         temp_dir: str,
         attachment_keys: list[str],
+        *,
+        decrypt_audio: bool = False,
+        e2ee_key: bytes | None = None,
     ) -> list[DownloadedAttachment]:
         downloaded_attachments: list[DownloadedAttachment] = []
 
@@ -411,6 +442,8 @@ class WoodwireBot:
                 normalized_key,
                 local_path,
             )
+            if decrypt_audio and is_supported_audio_content_type(content_type):
+                decrypt_attachment_file(local_path, e2ee_key)
             downloaded_attachments.append(
                 DownloadedAttachment(
                     content_type=content_type,
@@ -428,6 +461,15 @@ class WoodwireBot:
         )
         content_type = response.get("ContentType", "")
         return normalize_content_type(content_type)
+
+    def require_e2ee_key(self, schema_version: int) -> bytes | None:
+        if schema_version < 2:
+            return self.config.e2ee_key
+
+        if self.config.e2ee_key is None:
+            raise ValueError("Encrypted messages require WOODWIRE_E2EE_KEY")
+
+        return self.config.e2ee_key
 
     def build_backend_message(
         self,
@@ -581,6 +623,61 @@ def read_schema_version(payload: dict[str, Any]) -> int:
         raise ValueError("Message schemaVersion must be a positive integer")
 
     return version
+
+
+def parse_e2ee_key(value: str | None) -> bytes | None:
+    if value is None or value.strip() == "":
+        return None
+
+    try:
+        key_bytes = base64.b64decode(value.strip(), validate=True)
+    except (ValueError, binascii.Error) as error:
+        raise ValueError("WOODWIRE_E2EE_KEY must be valid base64") from error
+
+    if len(key_bytes) != E2EE_KEY_LENGTH_BYTES:
+        raise ValueError("WOODWIRE_E2EE_KEY must decode to exactly 32 bytes")
+
+    return key_bytes
+
+
+def encrypt_payload_bytes(payload: bytes, key: bytes | None) -> bytes:
+    if key is None:
+        raise ValueError("Missing E2EE key")
+
+    iv = os.urandom(E2EE_IV_LENGTH_BYTES)
+    ciphertext = AESGCM(key).encrypt(iv, payload, None)
+    return iv + ciphertext
+
+
+def decrypt_payload_bytes(payload: bytes, key: bytes | None) -> bytes:
+    if key is None:
+        raise ValueError("Missing E2EE key")
+
+    if len(payload) <= E2EE_IV_LENGTH_BYTES:
+        raise ValueError("Encrypted payload is too short")
+
+    iv = payload[:E2EE_IV_LENGTH_BYTES]
+    ciphertext = payload[E2EE_IV_LENGTH_BYTES:]
+    return AESGCM(key).decrypt(iv, ciphertext, None)
+
+
+def decrypt_encrypted_text(value: str, key: bytes | None) -> str:
+    try:
+        encrypted_bytes = base64.b64decode(value, validate=True)
+    except (ValueError, binascii.Error) as error:
+        raise ValueError("Encrypted text payload is not valid base64") from error
+
+    return decrypt_payload_bytes(encrypted_bytes, key).decode("utf-8").strip()
+
+
+def decrypt_attachment_file(local_path: str, key: bytes | None) -> None:
+    with open(local_path, "rb") as handle:
+        encrypted_bytes = handle.read()
+
+    plaintext_bytes = decrypt_payload_bytes(encrypted_bytes, key)
+
+    with open(local_path, "wb") as handle:
+        handle.write(plaintext_bytes)
 
 
 def build_attachment_filename(key: str, index: int) -> str:

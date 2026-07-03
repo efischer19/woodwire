@@ -97,6 +97,35 @@ describe('Woodwire Worker', () => {
     });
   });
 
+  test('preserves schema version 2 for encrypted message payloads', async () => {
+    const send = vi.fn().mockResolvedValue({ MessageId: 'message-1' });
+    const worker = createWorker({
+      createSqsClient: () => ({
+        send,
+      }),
+    });
+    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('conversation-123');
+
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/message', {
+        body: JSON.stringify({ attachments: [], schemaVersion: 2, text: 'encrypted-ciphertext' }),
+        headers: {
+          'content-type': 'application/json',
+          'X-Woodwire-Auth': baseEnv.WOODWIRE_AUTH,
+        },
+        method: 'POST',
+      }),
+      baseEnv,
+      {},
+    );
+
+    expect(response.status).toBe(202);
+    expect(JSON.parse(send.mock.calls[0][0].input.MessageBody)).toMatchObject({
+      schemaVersion: 2,
+      text: 'encrypted-ciphertext',
+    });
+  });
+
   test('returns validation errors for malformed message payloads', async () => {
     const worker = createWorker();
     const response = await worker.fetch(
@@ -496,20 +525,18 @@ describe('Woodwire Worker', () => {
     expect(signS3Url).not.toHaveBeenCalled();
   });
 
-  test('returns transcript text and a pre-signed audio URL for a completed response', async () => {
-    const signS3Url = vi.fn().mockResolvedValue('https://downloads.example.com/presigned-get');
+  test('returns pre-signed transcript and audio URLs for a completed response', async () => {
+    const signS3Url = vi
+      .fn()
+      .mockResolvedValueOnce('https://downloads.example.com/presigned-audio')
+      .mockResolvedValueOnce('https://downloads.example.com/presigned-transcript');
     const s3Send = vi
       .fn()
-      .mockResolvedValueOnce({
+      .mockResolvedValue({
         Contents: [
           { Key: 'outbox/conversation-123/1719758400000-response.md' },
           { Key: 'outbox/conversation-123/1719758400000-response.mp3' },
         ],
-      })
-      .mockResolvedValueOnce({
-        Body: {
-          transformToString: vi.fn().mockResolvedValue('Transcript reply'),
-        },
       });
     const worker = createWorker({
       createS3Client: () => ({
@@ -531,35 +558,34 @@ describe('Woodwire Worker', () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      audioUrl: 'https://downloads.example.com/presigned-get',
-      transcript: 'Transcript reply',
+      audioUrl: 'https://downloads.example.com/presigned-audio',
+      transcriptUrl: 'https://downloads.example.com/presigned-transcript',
     });
-    expect(s3Send).toHaveBeenCalledTimes(2);
-    expect(signS3Url).toHaveBeenCalledTimes(1);
+    expect(s3Send).toHaveBeenCalledTimes(1);
+    expect(signS3Url).toHaveBeenCalledTimes(2);
     expect(signS3Url.mock.calls[0][1]).toBeInstanceOf(GetObjectCommand);
     expect(signS3Url.mock.calls[0][1].input).toEqual({
       Bucket: baseEnv.CHAT_BUCKET_NAME,
       Key: 'outbox/conversation-123/1719758400000-response.mp3',
     });
     expect(signS3Url.mock.calls[0][2]).toEqual({ expiresIn: 900 });
+    expect(signS3Url.mock.calls[1][1]).toBeInstanceOf(GetObjectCommand);
+    expect(signS3Url.mock.calls[1][1].input).toEqual({
+      Bucket: baseEnv.CHAT_BUCKET_NAME,
+      Key: 'outbox/conversation-123/1719758400000-response.md',
+    });
   });
 
-  test('returns only transcript text when no audio response exists', async () => {
-    const s3Send = vi
-      .fn()
-      .mockResolvedValueOnce({
-        Contents: [{ Key: 'outbox/conversation-555/1719758400000-response.md' }],
-      })
-      .mockResolvedValueOnce({
-        Body: {
-          transformToString: vi.fn().mockResolvedValue('Transcript only'),
-        },
-      });
+  test('returns only a pre-signed transcript URL when no audio response exists', async () => {
+    const signS3Url = vi.fn().mockResolvedValue('https://downloads.example.com/presigned-transcript');
+    const s3Send = vi.fn().mockResolvedValue({
+      Contents: [{ Key: 'outbox/conversation-555/1719758400000-response.md' }],
+    });
     const worker = createWorker({
       createS3Client: () => ({
         send: s3Send,
       }),
-      signS3Url: vi.fn(),
+      signS3Url,
     });
 
     const response = await worker.fetch(
@@ -576,7 +602,7 @@ describe('Woodwire Worker', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       audioUrl: null,
-      transcript: 'Transcript only',
+      transcriptUrl: 'https://downloads.example.com/presigned-transcript',
     });
   });
 
@@ -606,7 +632,7 @@ describe('Woodwire Worker', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       audioUrl: 'https://downloads.example.com/presigned-audio',
-      transcript: null,
+      transcriptUrl: null,
     });
   });
 

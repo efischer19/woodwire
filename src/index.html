@@ -61,8 +61,9 @@
         <div class="setup-card">
           <h2 id="setup-heading">Connect your Worker</h2>
           <p>
-            Enter your shared passphrase once. Woodwire stores it in this browser and
-            sends it as the <code>X-Woodwire-Auth</code> header on every Worker request.
+            Enter your shared passphrase and AES-256 key once. Woodwire stores both in this
+            browser, sends the passphrase as the <code>X-Woodwire-Auth</code> header on every
+            Worker request, and uses the encryption key locally for end-to-end encryption.
           </p>
 
           <form id="setup-form" class="setup-form">
@@ -87,6 +88,19 @@
               autocomplete="current-password"
               required
             >
+            <label for="e2ee-key">Encryption key</label>
+            <input
+              id="e2ee-key"
+              name="e2ee-key"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="32-byte base64 AES key"
+              required
+            >
+            <p class="field-hint">
+              Save a 32-byte base64 encoded AES-256-GCM key. This key never leaves your browser.
+            </p>
             <label class="checkbox-field" for="autoplay-voice">
               <input id="autoplay-voice" name="autoplay-voice" type="checkbox">
               <span>Auto-play AI voice replies when available</span>
@@ -201,7 +215,7 @@
 
             <div class="composer-actions">
               <p id="queue-status" class="queue-status" role="status" aria-live="polite">
-                Save your passphrase to start sending messages.
+                Save your passphrase and E2EE key to start sending messages.
               </p>
               <button id="send-button" class="primary-button" type="submit">Send</button>
             </div>

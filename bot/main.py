@@ -642,6 +642,11 @@ def parse_e2ee_key(value: str | None) -> bytes | None:
 
 
 def load_local_env_file(path: str = ".env", *, environ: dict[str, str] | None = None) -> None:
+    """Load KEY=VALUE pairs from a local env file without overriding existing values.
+
+    When `environ` is provided, parsed values are written into that mapping instead
+    of `os.environ`, which keeps tests isolated from the real process environment.
+    """
     env = os.environ if environ is None else environ
 
     try:

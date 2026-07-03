@@ -33,6 +33,8 @@ const VOICE_MEMO_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp
 const VOICE_RESPONSE_NO_TRANSCRIPT_TEXT = "Voice response — no transcript available";
 const E2EE_IV_LENGTH_BYTES = 12;
 const E2EE_KEY_LENGTH_BYTES = 32;
+// Encode in 32 KB slices to avoid exceeding Function.apply / spread call limits.
+const BASE64_ENCODING_CHUNK_BYTES = 0x8000;
 const DEFAULT_DECRYPTION_FAILURE_MESSAGE =
   "Unable to decrypt data. Check that your saved E2EE key matches your bot.";
 let fallbackMessageCounter = 0;
@@ -1392,13 +1394,17 @@ function createVoiceResponsePlayer(elements, voiceResponse) {
 
 async function hydrateVoiceResponseAudio(elements, voiceResponse, audio, source, loadingIndicator) {
   try {
-    const audioUrl = voiceResponse.encrypted !== false
-      ? await getVoiceResponseAudioObjectUrl(
-          voiceResponse.conversationId,
-          normalizeVoiceResponseAudioUrl(voiceResponse.audioUrl),
-        )
-      : normalizeVoiceResponseAudioUrl(voiceResponse.audioUrl) ||
-        (await getVoiceResponseAudioUrl(voiceResponse.conversationId));
+    const responseAudioUrl = normalizeVoiceResponseAudioUrl(voiceResponse.audioUrl);
+    let audioUrl = responseAudioUrl;
+
+    if (voiceResponse.encrypted !== false) {
+      audioUrl = await getVoiceResponseAudioObjectUrl(
+        voiceResponse.conversationId,
+        responseAudioUrl,
+      );
+    } else if (!audioUrl) {
+      audioUrl = await getVoiceResponseAudioUrl(voiceResponse.conversationId);
+    }
 
     if (voiceResponse.conversationId) {
       VOICE_RESPONSE_AUDIO_URLS.set(voiceResponse.conversationId, audioUrl);
@@ -1975,7 +1981,7 @@ function setVoiceAutoplayPreference(isEnabled) {
 function normalizeStoredE2eeKey(value) {
   const trimmed = String(value || "").trim();
   if (!trimmed) {
-    throw new Error("Enter a 32-byte base64 encryption key before continuing.");
+    throw new Error("Encryption key is required.");
   }
 
   const decodedBytes = decodeBase64Bytes(trimmed);
@@ -2103,12 +2109,14 @@ function concatByteArrays(firstBytes, secondBytes) {
 }
 
 function encodeBase64Bytes(bytes) {
-  let binaryString = "";
-  for (const byte of bytes) {
-    binaryString += String.fromCharCode(byte);
+  const binaryChunks = [];
+  for (let index = 0; index < bytes.length; index += BASE64_ENCODING_CHUNK_BYTES) {
+    binaryChunks.push(
+      String.fromCharCode(...bytes.subarray(index, index + BASE64_ENCODING_CHUNK_BYTES)),
+    );
   }
 
-  return window.btoa(binaryString);
+  return window.btoa(binaryChunks.join(""));
 }
 
 function decodeBase64Bytes(value) {

@@ -70,6 +70,7 @@ INITIAL_BACKOFF_SECONDS = 1
 MAX_BACKOFF_SECONDS = 60
 PROCESSING_MARKER_KEY = "processing.json"
 TEMP_DIRECTORY_NAME = "woodwire"
+# Schema version 2 indicates encrypted payloads while version 1 remains supported for older clients.
 SUPPORTED_SCHEMA_VERSION = 2
 AWS_OPERATION_ERRORS = (BotoCoreError, ClientError)
 E2EE_IV_LENGTH_BYTES = 12
@@ -307,7 +308,7 @@ class WoodwireBot:
         message_text = read_message_text(payload, required=False)
         attachment_keys = read_attachment_keys(payload)
         temp_dir: str | None = None
-        e2ee_key = self.require_e2ee_key(schema_version)
+        e2ee_key = self.get_e2ee_key_for_schema(schema_version)
 
         if schema_version >= 2 and message_text:
             message_text = decrypt_encrypted_text(message_text, e2ee_key)
@@ -392,7 +393,7 @@ class WoodwireBot:
         timestamp = int(self.now().timestamp())
         key_prefix = f"outbox/{conversation_id}/{timestamp}-response"
         key = f"{key_prefix}.md"
-        e2ee_key = self.require_e2ee_key(2) if encrypt_output else None
+        e2ee_key = self.get_e2ee_key_for_schema(2) if encrypt_output else None
         response_body = response_text.encode("utf-8")
         if e2ee_key is not None:
             response_body = encrypt_payload_bytes(response_body, e2ee_key)
@@ -462,9 +463,9 @@ class WoodwireBot:
         content_type = response.get("ContentType", "")
         return normalize_content_type(content_type)
 
-    def require_e2ee_key(self, schema_version: int) -> bytes | None:
+    def get_e2ee_key_for_schema(self, schema_version: int) -> bytes | None:
         if schema_version < 2:
-            return self.config.e2ee_key
+            return None
 
         if self.config.e2ee_key is None:
             raise ValueError("Encrypted messages require WOODWIRE_E2EE_KEY")

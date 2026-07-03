@@ -164,7 +164,7 @@ async function handleMessageRequest(request, env, dependencies) {
   }
 
   const conversationId = crypto.randomUUID();
-  const schemaVersion = normalizeMessageSchemaVersion(body.schemaVersion);
+  const schemaVersion = getMessageSchemaVersion(body.schemaVersion);
   const payload = {
     schemaVersion,
     attachments: body.attachments,
@@ -416,8 +416,8 @@ async function handleResponseRequest(request, env, dependencies) {
   }
 }
 
-function normalizeMessageSchemaVersion(value) {
-  return value === 2 ? 2 : 1;
+function getMessageSchemaVersion(value) {
+  return Number.isInteger(value) && value >= 1 && value <= 2 ? value : 1;
 }
 
 function validateMessagePayload(body) {

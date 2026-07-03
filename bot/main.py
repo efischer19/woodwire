@@ -641,6 +641,41 @@ def parse_e2ee_key(value: str | None) -> bytes | None:
     return key_bytes
 
 
+def load_local_env_file(path: str = ".env", *, environ: dict[str, str] | None = None) -> None:
+    """Load KEY=VALUE pairs from a local env file without overriding existing values.
+
+    When `environ` is provided, parsed values are written into that mapping instead
+    of `os.environ`, which keeps tests isolated from the real process environment.
+    """
+    env = os.environ if environ is None else environ
+
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+
+                if not line or line.startswith("#"):
+                    continue
+
+                if line.startswith("export "):
+                    line = line.removeprefix("export ").strip()
+
+                key, separator, value = line.partition("=")
+                key = key.strip()
+
+                if separator != "=" or not key:
+                    continue
+
+                value = value.strip()
+
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                    value = value[1:-1]
+
+                env.setdefault(key, value)
+    except FileNotFoundError:
+        return
+
+
 def encrypt_payload_bytes(payload: bytes, key: bytes | None) -> bytes:
     if key is None:
         raise ValueError("Missing E2EE key")
@@ -737,6 +772,7 @@ def install_signal_handlers(bot: WoodwireBot) -> None:
 
 
 def main() -> int:
+    load_local_env_file()
     logger = configure_logging()
 
     try:

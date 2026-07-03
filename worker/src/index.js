@@ -164,8 +164,9 @@ async function handleMessageRequest(request, env, dependencies) {
   }
 
   const conversationId = crypto.randomUUID();
+  const schemaVersion = getMessageSchemaVersion(body.schemaVersion);
   const payload = {
-    schemaVersion: 1,
+    schemaVersion,
     attachments: body.attachments,
     conversationId,
     createdAt: new Date().toISOString(),
@@ -384,7 +385,7 @@ async function handleResponseRequest(request, env, dependencies) {
   }
 
   try {
-    const [audioUrl, transcript] = await Promise.all([
+    const [audioUrl, transcriptUrl] = await Promise.all([
       responseFiles.audioKey
         ? signS3Command(
             s3Client,
@@ -397,18 +398,26 @@ async function handleResponseRequest(request, env, dependencies) {
           )
         : Promise.resolve(null),
       responseFiles.transcriptKey
-        ? fetchTranscript(
+        ? signS3Command(
             s3Client,
-            env.CHAT_BUCKET_NAME,
-            responseFiles.transcriptKey,
+            new GetObjectCommand({
+              Bucket: env.CHAT_BUCKET_NAME,
+              Key: responseFiles.transcriptKey,
+            }),
+            DOWNLOAD_URL_EXPIRY_SECONDS,
+            dependencies,
           )
         : Promise.resolve(null),
     ]);
 
-    return createResponse(request, env, 200, { audioUrl, transcript });
+    return createResponse(request, env, 200, { audioUrl, transcriptUrl });
   } catch {
     return createResponse(request, env, 502, { error: 'Bad Gateway' });
   }
+}
+
+function getMessageSchemaVersion(value) {
+  return Number.isInteger(value) && value >= 1 && value <= 2 ? value : 1;
 }
 
 function validateMessagePayload(body) {
@@ -422,6 +431,13 @@ function validateMessagePayload(body) {
 
   if (!Array.isArray(body.attachments)) {
     return 'Field "attachments" must be an array';
+  }
+
+  if (
+    body.schemaVersion !== undefined &&
+    (!Number.isInteger(body.schemaVersion) || body.schemaVersion < 1 || body.schemaVersion > 2)
+  ) {
+    return 'Field "schemaVersion" must be 1 or 2';
   }
 
   if (!body.attachments.every((attachment) => typeof attachment === 'string' && attachment.trim() !== '')) {

@@ -11,6 +11,7 @@ const STORAGE_KEYS = {
   apiBase: "woodwire_api_base",
   autoplay: "woodwire_autoplay",
   auth: "woodwire_auth",
+  e2eeKey: "woodwire_e2ee_key",
   history: "woodwire_history",
   pendingConversations: "woodwire_pending_conversations",
   queue: "woodwire_queue",
@@ -25,12 +26,21 @@ const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 const SERVICE_WORKER_PATH = "sw.js";
 const ATTACHMENT_DOWNLOAD_URLS = new Map();
+const ATTACHMENT_AUDIO_URLS = new Map();
 const VOICE_RESPONSE_AUDIO_URLS = new Map();
 const VOICE_MEMO_READY_TEXT = "Voice memo ready.";
 const VOICE_MEMO_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
 const VOICE_RESPONSE_NO_TRANSCRIPT_TEXT = "Voice response — no transcript available";
+const E2EE_IV_LENGTH_BYTES = 12;
+const E2EE_KEY_LENGTH_BYTES = 32;
+// Encode in 32 KB slices to avoid exceeding Function.apply / spread call limits.
+const BASE64_ENCODING_CHUNK_BYTES = 0x8000;
+const DEFAULT_DECRYPTION_FAILURE_MESSAGE =
+  "Unable to decrypt data. Check that your saved E2EE key matches your bot.";
 let fallbackMessageCounter = 0;
 let fallbackAttachmentCounter = 0;
+let importedE2eeKeyValue = "";
+let importedE2eeKeyPromise = null;
 
 document.addEventListener("DOMContentLoaded", () => {
   initThemeToggle();
@@ -71,6 +81,7 @@ function initChatApp() {
     try {
       const apiBaseUrl = normalizeApiBaseUrl(elements.workerUrl.value);
       const passphrase = elements.passphrase.value.trim();
+      const e2eeKey = normalizeStoredE2eeKey(elements.e2eeKey.value);
 
       if (!passphrase) {
         showFlashMessage(elements, "Enter a passphrase before continuing.", true);
@@ -80,6 +91,7 @@ function initChatApp() {
 
       setStorageItem(STORAGE_KEYS.apiBase, apiBaseUrl);
       setStorageItem(STORAGE_KEYS.auth, passphrase);
+      setStorageItem(STORAGE_KEYS.e2eeKey, e2eeKey);
       setVoiceAutoplayPreference(elements.autoplayVoice?.checked);
       toggleSetupPanel(elements, false);
       updateConnectionUi(elements);
@@ -112,10 +124,10 @@ function initChatApp() {
   });
 
   elements.attachmentButton.addEventListener("click", () => {
-    if (!getStorageItem(STORAGE_KEYS.auth)) {
+    if (!hasSavedConnectionCredentials()) {
       toggleSetupPanel(elements, true);
-      showFlashMessage(elements, "Save your passphrase before adding attachments.", true);
-      elements.passphrase.focus();
+      showFlashMessage(elements, "Save your passphrase and E2EE key before adding attachments.", true);
+      focusSetupField(elements);
       return;
     }
 
@@ -161,10 +173,10 @@ function initChatApp() {
         return;
       }
 
-      if (!getStorageItem(STORAGE_KEYS.auth)) {
+      if (!hasSavedConnectionCredentials()) {
         toggleSetupPanel(elements, true);
-        showFlashMessage(elements, "Save your passphrase before sending a message.", true);
-        elements.passphrase.focus();
+        showFlashMessage(elements, "Save your passphrase and E2EE key before sending a message.", true);
+        focusSetupField(elements);
         return;
       }
 
@@ -242,6 +254,7 @@ function getAppElements() {
     autoplayVoice: document.getElementById("autoplay-voice"),
     composer: document.getElementById("composer"),
     connectionSettings: document.getElementById("connection-settings"),
+    e2eeKey: document.getElementById("e2ee-key"),
     flashMessage: document.getElementById("flash-message"),
     messageHistory: document.getElementById("message-history"),
     messageInput: document.getElementById("message-input"),
@@ -270,45 +283,49 @@ function getAppElements() {
 function hydrateSetupForm(elements) {
   elements.workerUrl.value = getStorageItem(STORAGE_KEYS.apiBase) || WORKER_BASE_URL;
   elements.passphrase.value = getStorageItem(STORAGE_KEYS.auth) || "";
+  elements.e2eeKey.value = getStorageItem(STORAGE_KEYS.e2eeKey) || "";
   if (elements.autoplayVoice) {
     elements.autoplayVoice.checked = isVoiceAutoplayEnabled();
   }
-  toggleSetupPanel(elements, !getStorageItem(STORAGE_KEYS.auth));
+  toggleSetupPanel(elements, !hasSavedConnectionCredentials());
 }
 
 function updateConnectionUi(elements) {
-  const hasAuth = Boolean(getStorageItem(STORAGE_KEYS.auth));
-  elements.attachmentButton.disabled = !hasAuth;
-  elements.attachmentInput.disabled = !hasAuth;
-  elements.messageInput.disabled = !hasAuth;
-  elements.sendButton.disabled = !hasAuth;
-  elements.connectionSettings.textContent = hasAuth
+  const hasConnectionDetails = hasSavedConnectionCredentials();
+  elements.attachmentButton.disabled = !hasConnectionDetails;
+  elements.attachmentInput.disabled = !hasConnectionDetails;
+  elements.messageInput.disabled = !hasConnectionDetails;
+  elements.sendButton.disabled = !hasConnectionDetails;
+  elements.connectionSettings.textContent = hasConnectionDetails
     ? "Update connection"
     : "Connection settings";
 }
 
 function refreshComposerControls(elements, state) {
-  const hasAuth = Boolean(getStorageItem(STORAGE_KEYS.auth));
+  const hasConnectionDetails = hasSavedConnectionCredentials();
   const hasUploadingAttachment = state.composerAttachments.some(
     (attachment) => attachment.status === "uploading",
   );
   const canAddMoreAttachments = state.composerAttachments.length < MAX_ATTACHMENT_COUNT;
   const isRecordingVoiceMemo = state.voiceMemo.isRecording;
 
-  elements.attachmentButton.disabled = !hasAuth || !canAddMoreAttachments || isRecordingVoiceMemo;
-  elements.attachmentInput.disabled = !hasAuth || !canAddMoreAttachments || isRecordingVoiceMemo;
-  elements.sendButton.disabled = !hasAuth || hasUploadingAttachment || isRecordingVoiceMemo;
+  elements.attachmentButton.disabled =
+    !hasConnectionDetails || !canAddMoreAttachments || isRecordingVoiceMemo;
+  elements.attachmentInput.disabled =
+    !hasConnectionDetails || !canAddMoreAttachments || isRecordingVoiceMemo;
+  elements.sendButton.disabled =
+    !hasConnectionDetails || hasUploadingAttachment || isRecordingVoiceMemo;
 
   if (elements.voiceMemoButton) {
     elements.voiceMemoButton.disabled =
       !state.voiceMemo.isSupported ||
-      !hasAuth ||
+      !hasConnectionDetails ||
       (!canAddMoreAttachments && !isRecordingVoiceMemo);
   }
 
   if (elements.voiceMemoAttachButton) {
     elements.voiceMemoAttachButton.disabled =
-      !hasAuth ||
+    !hasConnectionDetails ||
       !state.voiceMemo.recordedBlob ||
       !canAddMoreAttachments ||
       isRecordingVoiceMemo;
@@ -382,6 +399,7 @@ function startAttachmentUpload(file, elements, state) {
 
   const attachment = {
     contentType: normalizeAttachmentContentType(file.type),
+    encrypted: normalizeAttachmentContentType(file.type).startsWith("audio/"),
     id:
       globalThis.crypto?.randomUUID?.() ||
       `attachment-${Date.now()}-${fallbackAttachmentCounter}-${Math.random().toString(16).slice(2)}`,
@@ -403,10 +421,11 @@ function startAttachmentUpload(file, elements, state) {
 
   void (async () => {
     try {
-      const { key, uploadUrl } = await requestUploadReservation(file);
+      const uploadFile = attachment.encrypted ? await encryptAttachmentFile(file) : file;
+      const { key, uploadUrl } = await requestUploadReservation(file, uploadFile.size);
       attachment.key = key;
       attachment.previewUrl = await previewPromise.catch(() => null);
-      await uploadAttachmentFile(uploadUrl, file, (progress) => {
+      await uploadAttachmentFile(uploadUrl, uploadFile, (progress) => {
         attachment.progress = progress;
         renderPendingAttachments(elements, state);
       }, attachment);
@@ -443,12 +462,12 @@ function startAttachmentUpload(file, elements, state) {
   })();
 }
 
-async function requestUploadReservation(file) {
+async function requestUploadReservation(file, sizeBytes = file.size) {
   const response = await workerFetch("/api/upload-url", {
     body: JSON.stringify({
       contentType: normalizeAttachmentContentType(file.type),
       filename: file.name,
-      sizeBytes: file.size,
+      sizeBytes,
     }),
     headers: {
       "Content-Type": "application/json",
@@ -688,10 +707,12 @@ function createLocalMessage(text, attachments = []) {
 
 async function sendMessage(message, elements, state) {
   try {
+    const encryptedText = await encryptMessageText(message.text);
     const response = await workerFetch("/api/message", {
       body: JSON.stringify({
         attachments: message.attachments.map((attachment) => attachment.key),
-        text: message.text,
+        schemaVersion: 2,
+        text: encryptedText,
       }),
       headers: {
         "Content-Type": "application/json",
@@ -756,7 +777,7 @@ function ensurePollingLoop(elements, state, delayMs = 0) {
     state.pollTimer ||
     !navigator.onLine ||
     !state.pendingConversations.size ||
-    !getStorageItem(STORAGE_KEYS.auth)
+    !hasSavedConnectionCredentials()
   ) {
     return;
   }
@@ -896,7 +917,29 @@ async function appendAssistantReply(conversation, elements) {
   }
 
   const payload = await response.json();
-  const transcript = normalizeAssistantTranscript(payload.transcript);
+  let transcript = normalizeAssistantTranscript(payload.transcript);
+  const transcriptUrl = normalizeVoiceResponseAudioUrl(payload.transcriptUrl);
+  if (!transcript && transcriptUrl) {
+    try {
+      transcript = await fetchEncryptedTextPayload(transcriptUrl);
+    } catch (error) {
+      if (!isDecryptionFailure(error)) {
+        throw error;
+      }
+
+      appendMessage(elements, {
+        author: "AI",
+        conversationId: conversation.conversationId,
+        responseFor: conversation.conversationId,
+        text: "Unable to decrypt AI reply. Check your saved E2EE key.",
+        timestamp: new Date().toISOString(),
+        variant: "assistant",
+      });
+      showFlashMessage(elements, error.message, true);
+      announce(elements, "The AI reply could not be decrypted.");
+      return;
+    }
+  }
   const audioUrl = normalizeVoiceResponseAudioUrl(payload.audioUrl);
   appendMessage(elements, {
     author: "AI",
@@ -907,8 +950,9 @@ async function appendAssistantReply(conversation, elements) {
     variant: "assistant",
     voiceResponse: audioUrl
       ? {
-          audioUrl,
           conversationId: conversation.conversationId,
+          audioUrl,
+          encrypted: true,
           hasAudio: true,
         }
       : null,
@@ -1077,10 +1121,10 @@ function updateMessageStatus(elements, localId, statusText, isError) {
 
 function updateQueueStatus(elements) {
   const count = getQueuedMessages().length;
-  const hasAuth = Boolean(getStorageItem(STORAGE_KEYS.auth));
+  const hasConnectionDetails = hasSavedConnectionCredentials();
 
-  if (!hasAuth) {
-    elements.queueStatus.textContent = "Save your passphrase to start sending messages.";
+  if (!hasConnectionDetails) {
+    elements.queueStatus.textContent = "Save your passphrase and E2EE key to start sending messages.";
     return;
   }
 
@@ -1156,6 +1200,7 @@ function serializeStoredVoiceResponse(voiceResponse) {
 
   return {
     conversationId: voiceResponse.conversationId,
+    encrypted: Boolean(voiceResponse.encrypted),
     hasAudio: true,
   };
 }
@@ -1168,6 +1213,7 @@ function normalizeStoredVoiceResponse(voiceResponse, fallbackConversationId) {
 
   return {
     conversationId,
+    encrypted: Boolean(voiceResponse.encrypted),
     hasAudio: true,
   };
 }
@@ -1185,6 +1231,7 @@ function updateStoredMessageStatus(localId, statusText) {
 function createStoredAttachment(attachment, includeLocalUrls = false) {
   return {
     contentType: attachment.contentType,
+    encrypted: Boolean(attachment.encrypted),
     key: attachment.key,
     linkUrl: includeLocalUrls ? attachment.linkUrl || null : null,
     name: attachment.name,
@@ -1205,6 +1252,7 @@ function normalizeStoredAttachments(attachments = []) {
     .filter((attachment) => attachment && typeof attachment === "object")
     .map((attachment) => ({
       contentType: attachment.contentType || "",
+      encrypted: Boolean(attachment.encrypted),
       key: attachment.key || "",
       linkUrl: attachment.linkUrl || null,
       name: getAttachmentDisplayName(attachment),
@@ -1282,7 +1330,15 @@ function createMessageAttachments(elements, attachments) {
       item.append(wrapper);
 
       if (attachment.key) {
-        void hydrateAttachmentLink(elements, attachment.key, link, null, audio);
+        void hydrateAttachmentLink(
+          elements,
+          attachment.key,
+          link,
+          null,
+          audio,
+          attachment.contentType,
+          attachment.encrypted,
+        );
       }
     } else if (linkUrl) {
       const link = document.createElement("a");
@@ -1338,9 +1394,17 @@ function createVoiceResponsePlayer(elements, voiceResponse) {
 
 async function hydrateVoiceResponseAudio(elements, voiceResponse, audio, source, loadingIndicator) {
   try {
-    const audioUrl =
-      normalizeVoiceResponseAudioUrl(voiceResponse.audioUrl) ||
-      (await getVoiceResponseAudioUrl(voiceResponse.conversationId));
+    const responseAudioUrl = normalizeVoiceResponseAudioUrl(voiceResponse.audioUrl);
+    let audioUrl = responseAudioUrl;
+
+    if (voiceResponse.encrypted !== false) {
+      audioUrl = await getVoiceResponseAudioObjectUrl(
+        voiceResponse.conversationId,
+        responseAudioUrl,
+      );
+    } else if (!audioUrl) {
+      audioUrl = await getVoiceResponseAudioUrl(voiceResponse.conversationId);
+    }
 
     if (voiceResponse.conversationId) {
       VOICE_RESPONSE_AUDIO_URLS.set(voiceResponse.conversationId, audioUrl);
@@ -1368,9 +1432,16 @@ async function hydrateVoiceResponseAudio(elements, voiceResponse, audio, source,
 
     source.src = audioUrl;
     audio.load();
-  } catch {
-    loadingIndicator.textContent = "Audio could not be loaded.";
-    announce(elements, "The voice response audio could not be loaded.");
+  } catch (error) {
+    loadingIndicator.textContent = isDecryptionFailure(error)
+      ? "Audio could not be decrypted. Check your saved E2EE key."
+      : "Audio could not be loaded.";
+    announce(
+      elements,
+      isDecryptionFailure(error)
+        ? "The voice response audio could not be decrypted."
+        : "The voice response audio could not be loaded.",
+    );
   }
 }
 
@@ -1382,9 +1453,20 @@ async function attemptVoiceResponseAutoplay(audio) {
   }
 }
 
-async function hydrateAttachmentLink(elements, key, target, imageElement, audioElement) {
+async function hydrateAttachmentLink(
+  elements,
+  key,
+  target,
+  imageElement,
+  audioElement,
+  contentType = "",
+  isEncrypted = false,
+) {
   try {
-    const downloadUrl = await getAttachmentDownloadUrl(key);
+    const downloadUrl =
+      audioElement && isEncrypted
+        ? await getDecryptedAttachmentAudioUrl(key, contentType)
+        : await getAttachmentDownloadUrl(key);
 
     if (target.tagName.toUpperCase() === "A") {
       target.href = downloadUrl;
@@ -1407,8 +1489,13 @@ async function hydrateAttachmentLink(elements, key, target, imageElement, audioE
       audioElement.src = downloadUrl;
       audioElement.hidden = false;
     }
-  } catch {
-    announce(elements, "An attachment preview could not be loaded.");
+  } catch (error) {
+    announce(
+      elements,
+      isDecryptionFailure(error)
+        ? "An attachment preview could not be decrypted."
+        : "An attachment preview could not be loaded.",
+    );
   }
 }
 
@@ -1480,10 +1567,10 @@ function getSupportedVoiceMemoMimeType() {
 }
 
 async function startVoiceMemoRecording(elements, state) {
-  if (!getStorageItem(STORAGE_KEYS.auth)) {
+  if (!hasSavedConnectionCredentials()) {
     toggleSetupPanel(elements, true);
-    showFlashMessage(elements, "Save your passphrase before recording a voice memo.", true);
-    elements.passphrase.focus();
+    showFlashMessage(elements, "Save your passphrase and E2EE key before recording a voice memo.", true);
+    focusSetupField(elements);
     return;
   }
 
@@ -1791,6 +1878,21 @@ async function getVoiceResponseAudioUrl(conversationId) {
   return audioUrl;
 }
 
+async function getVoiceResponseAudioObjectUrl(conversationId, downloadUrl = "") {
+  if (!conversationId) {
+    throw new Error("Missing conversation ID");
+  }
+
+  if (VOICE_RESPONSE_AUDIO_URLS.has(conversationId)) {
+    return VOICE_RESPONSE_AUDIO_URLS.get(conversationId);
+  }
+
+  const signedUrl = downloadUrl || (await getVoiceResponseAudioUrl(conversationId));
+  const objectUrl = await decryptBinaryDownload(signedUrl, "audio/mpeg");
+  VOICE_RESPONSE_AUDIO_URLS.set(conversationId, objectUrl);
+  return objectUrl;
+}
+
 function getPendingConversations() {
   return getStorageJson(STORAGE_KEYS.pendingConversations, []);
 }
@@ -1818,6 +1920,29 @@ function normalizeApiBaseUrl(value) {
   }
 
   return url.origin;
+}
+
+function hasSavedConnectionCredentials() {
+  const auth = getStorageItem(STORAGE_KEYS.auth);
+  if (!auth) {
+    return false;
+  }
+
+  try {
+    normalizeStoredE2eeKey(getStorageItem(STORAGE_KEYS.e2eeKey) || "");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function focusSetupField(elements) {
+  if (!getStorageItem(STORAGE_KEYS.auth)) {
+    elements.passphrase.focus();
+    return;
+  }
+
+  elements.e2eeKey.focus();
 }
 
 function normalizeAssistantTranscript(value) {
@@ -1851,6 +1976,166 @@ function isVoiceAutoplayEnabled() {
 
 function setVoiceAutoplayPreference(isEnabled) {
   setStorageItem(STORAGE_KEYS.autoplay, String(Boolean(isEnabled)));
+}
+
+function normalizeStoredE2eeKey(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    throw new Error("Encryption key is required.");
+  }
+
+  const decodedBytes = decodeBase64Bytes(trimmed);
+  if (decodedBytes.byteLength !== E2EE_KEY_LENGTH_BYTES) {
+    throw new Error("Encryption key must decode to exactly 32 bytes.");
+  }
+
+  return trimmed;
+}
+
+async function getImportedE2eeKey() {
+  const keyValue = normalizeStoredE2eeKey(getStorageItem(STORAGE_KEYS.e2eeKey) || "");
+
+  if (!globalThis.crypto?.subtle) {
+    throw new Error("WebCrypto is unavailable in this browser.");
+  }
+
+  if (keyValue !== importedE2eeKeyValue) {
+    importedE2eeKeyValue = keyValue;
+    importedE2eeKeyPromise = globalThis.crypto.subtle.importKey(
+      "raw",
+      decodeBase64Bytes(keyValue),
+      { name: "AES-GCM" },
+      false,
+      ["decrypt", "encrypt"],
+    );
+  }
+
+  return importedE2eeKeyPromise;
+}
+
+async function encryptMessageText(text) {
+  const plaintextBytes = new TextEncoder().encode(text);
+  const ciphertextBytes = await encryptPayloadBytes(plaintextBytes);
+  return encodeBase64Bytes(ciphertextBytes);
+}
+
+async function encryptAttachmentFile(file) {
+  const plaintextBytes = new Uint8Array(await file.arrayBuffer());
+  const ciphertextBytes = await encryptPayloadBytes(plaintextBytes);
+  return new Blob([ciphertextBytes], {
+    type: normalizeAttachmentContentType(file.type) || "application/octet-stream",
+  });
+}
+
+async function fetchEncryptedTextPayload(downloadUrl) {
+  const ciphertextBytes = await fetchDownloadBytes(downloadUrl);
+  const plaintextBytes = await decryptPayloadBytes(
+    ciphertextBytes,
+    "Unable to decrypt AI reply. Check your saved E2EE key.",
+  );
+  return new TextDecoder().decode(plaintextBytes);
+}
+
+async function getDecryptedAttachmentAudioUrl(key, contentType) {
+  if (ATTACHMENT_AUDIO_URLS.has(key)) {
+    return ATTACHMENT_AUDIO_URLS.get(key);
+  }
+
+  const downloadUrl = await getAttachmentDownloadUrl(key);
+  const objectUrl = await decryptBinaryDownload(downloadUrl, contentType);
+  ATTACHMENT_AUDIO_URLS.set(key, objectUrl);
+  return objectUrl;
+}
+
+async function decryptBinaryDownload(downloadUrl, contentType) {
+  const ciphertextBytes = await fetchDownloadBytes(downloadUrl);
+  const plaintextBytes = await decryptPayloadBytes(
+    ciphertextBytes,
+    "Unable to decrypt data. Check your saved E2EE key.",
+  );
+  const decryptedBlob = new Blob([plaintextBytes], {
+    type: contentType || "application/octet-stream",
+  });
+  return URL.createObjectURL(decryptedBlob);
+}
+
+async function fetchDownloadBytes(downloadUrl) {
+  const response = await fetch(downloadUrl);
+  if (!response.ok) {
+    throw new Error(`Download failed with status ${response.status}.`);
+  }
+
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+async function encryptPayloadBytes(plaintextBytes) {
+  const encryptionKey = await getImportedE2eeKey();
+  const iv = globalThis.crypto.getRandomValues(new Uint8Array(E2EE_IV_LENGTH_BYTES));
+  const ciphertext = await globalThis.crypto.subtle.encrypt(
+    { iv, name: "AES-GCM" },
+    encryptionKey,
+    plaintextBytes,
+  );
+
+  return concatByteArrays(iv, new Uint8Array(ciphertext));
+}
+
+async function decryptPayloadBytes(ciphertextBytes, message = DEFAULT_DECRYPTION_FAILURE_MESSAGE) {
+  if (ciphertextBytes.byteLength <= E2EE_IV_LENGTH_BYTES) {
+    throw createDecryptionFailure(message);
+  }
+
+  const encryptionKey = await getImportedE2eeKey();
+  const iv = ciphertextBytes.slice(0, E2EE_IV_LENGTH_BYTES);
+  const ciphertext = ciphertextBytes.slice(E2EE_IV_LENGTH_BYTES);
+
+  try {
+    const plaintext = await globalThis.crypto.subtle.decrypt(
+      { iv, name: "AES-GCM" },
+      encryptionKey,
+      ciphertext,
+    );
+    return new Uint8Array(plaintext);
+  } catch {
+    throw createDecryptionFailure(message);
+  }
+}
+
+function concatByteArrays(firstBytes, secondBytes) {
+  const combinedBytes = new Uint8Array(firstBytes.byteLength + secondBytes.byteLength);
+  combinedBytes.set(firstBytes, 0);
+  combinedBytes.set(secondBytes, firstBytes.byteLength);
+  return combinedBytes;
+}
+
+function encodeBase64Bytes(bytes) {
+  const binaryChunks = [];
+  for (let index = 0; index < bytes.length; index += BASE64_ENCODING_CHUNK_BYTES) {
+    binaryChunks.push(
+      String.fromCharCode(...bytes.subarray(index, index + BASE64_ENCODING_CHUNK_BYTES)),
+    );
+  }
+
+  return window.btoa(binaryChunks.join(""));
+}
+
+function decodeBase64Bytes(value) {
+  try {
+    const binaryString = window.atob(value);
+    return Uint8Array.from(binaryString, (character) => character.charCodeAt(0));
+  } catch {
+    throw new Error("Encryption key must be valid base64.");
+  }
+}
+
+function createDecryptionFailure(message) {
+  return Object.assign(new Error(message), {
+    code: "decryption-failed",
+  });
+}
+
+function isDecryptionFailure(error) {
+  return error?.code === "decryption-failed";
 }
 
 async function workerFetch(pathname, options) {

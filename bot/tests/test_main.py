@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import tempfile
@@ -17,6 +18,8 @@ from bot.main import (
     VISIBILITY_TIMEOUT_SECONDS,
     WoodwireBot,
     combine_message_text,
+    decrypt_payload_bytes,
+    encrypt_payload_bytes,
     read_schema_version,
 )
 from bot.voice import VoiceEngineUnavailableError
@@ -34,6 +37,7 @@ def build_message(
     text: str = "Hello",
     *,
     attachments: list[str] | None = None,
+    schema_version: int = 1,
 ) -> dict[str, str]:
     return {
         "Body": json.dumps(
@@ -41,6 +45,7 @@ def build_message(
                 "attachments": attachments or [],
                 "conversationId": "conversation-123",
                 "createdAt": "2026-06-30T12:00:00.000Z",
+                "schemaVersion": schema_version,
                 "text": text,
             }
         ),
@@ -55,14 +60,17 @@ class WoodwireBotTests(unittest.TestCase):
             aws_access_key_id="access-key",
             aws_region="us-east-1",
             aws_secret_access_key="secret-key",
+            e2ee_key=None,
             s3_bucket_name="woodwire-chat",
             sqs_queue_url="https://sqs.us-east-1.amazonaws.com/123456789012/woodwire-chat",
         )
         self.fixed_now = datetime(2026, 6, 30, 12, 0, tzinfo=timezone.utc)
+        self.e2ee_key = bytes(range(1, 33))
 
     def create_bot(self, **overrides) -> WoodwireBot:
+        config = overrides.pop("config", self.config)
         return WoodwireBot(
-            self.config,
+            config,
             logger=overrides.pop("logger", Mock()),
             now=overrides.pop("now", lambda: self.fixed_now),
             ai_backend=overrides.pop("ai_backend", MockBackend()),
@@ -246,6 +254,109 @@ class WoodwireBotTests(unittest.TestCase):
         self.assertEqual(audio_call.kwargs["Key"], "outbox/conversation-123/1782820800-response.mp3")
         self.assertEqual(audio_call.kwargs["ContentType"], "audio/mpeg")
         self.assertEqual(audio_call.kwargs["Body"], b"mp3-data")
+
+    def test_schema_version_2_decrypts_audio_and_encrypts_responses(self) -> None:
+        sqs_client = Mock()
+        s3_client = Mock()
+        decrypted_audio_payload = b"voice-note-bytes"
+        encrypted_text = base64.b64encode(
+            encrypt_payload_bytes(b"Encrypted hello", self.e2ee_key)
+        ).decode("ascii")
+        recorded_messages: list[str] = []
+        recorded_audio_bytes: list[bytes] = []
+        test_case = self
+        config = BotConfig(
+            aws_access_key_id=self.config.aws_access_key_id,
+            aws_region=self.config.aws_region,
+            aws_secret_access_key=self.config.aws_secret_access_key,
+            e2ee_key=self.e2ee_key,
+            s3_bucket_name=self.config.s3_bucket_name,
+            sqs_queue_url=self.config.sqs_queue_url,
+        )
+
+        class RecordingBackend(MockBackend):
+            def process(self, message: str, attachments: list[str]) -> str:
+                recorded_messages.append(message)
+                test_case.assertEqual(len(attachments), 1)
+                return "Encrypted reply"
+
+        class RecordingVoicePipeline:
+            def __init__(self, test_case: "WoodwireBotTests") -> None:
+                self.test_case = test_case
+
+            def transcribe_audio(self, audio_path: str, _temp_dir: str) -> str:
+                with open(audio_path, "rb") as handle:
+                    recorded_audio_bytes.append(handle.read())
+                return "Voice memo transcript"
+
+            def synthesize_response(self, text: str, temp_dir: str) -> str:
+                self.test_case.assertEqual(text, "Encrypted reply")
+                output_path = os.path.join(temp_dir, "response.mp3")
+
+                with open(output_path, "wb") as handle:
+                    handle.write(b"encrypted-mp3")
+
+                return output_path
+
+        s3_client.head_object.return_value = {"ContentType": "audio/webm"}
+
+        with tempfile.TemporaryDirectory() as temp_root_dir:
+            conversation_temp_dir = os.path.join(
+                temp_root_dir,
+                "woodwire",
+                "conversation-123",
+            )
+
+            def download_file(_bucket: str, _key: str, filename: str) -> None:
+                self.assertTrue(filename.startswith(conversation_temp_dir))
+                with open(filename, "wb") as handle:
+                    handle.write(encrypt_payload_bytes(decrypted_audio_payload, self.e2ee_key))
+
+            s3_client.download_file.side_effect = download_file
+            bot = self.create_bot(
+                ai_backend=RecordingBackend(),
+                config=config,
+                s3_client=s3_client,
+                sqs_client=sqs_client,
+                temp_root_dir=temp_root_dir,
+                voice_pipeline=RecordingVoicePipeline(self),
+            )
+
+            response_key = bot.handle_message(
+                build_message(
+                    encrypted_text,
+                    attachments=["attachments/conversation-123/voice-note.webm"],
+                    schema_version=2,
+                )
+            )
+
+            self.assertEqual(response_key, "outbox/conversation-123/1782820800-response.md")
+            self.assertEqual(
+                recorded_messages,
+                ["Encrypted hello\n\nVoice memo transcript:\nVoice memo transcript"],
+            )
+            self.assertEqual(recorded_audio_bytes, [decrypted_audio_payload])
+
+        marker_call, response_call, audio_call = s3_client.put_object.call_args_list
+        self.assertEqual(marker_call.kwargs["Key"], "outbox/conversation-123/processing.json")
+        self.assertEqual(
+            decrypt_payload_bytes(response_call.kwargs["Body"], self.e2ee_key),
+            b"Encrypted reply",
+        )
+        self.assertEqual(
+            decrypt_payload_bytes(audio_call.kwargs["Body"], self.e2ee_key),
+            b"encrypted-mp3",
+        )
+
+    def test_schema_version_2_requires_e2ee_key(self) -> None:
+        bot = self.create_bot()
+
+        encrypted_text = base64.b64encode(
+            encrypt_payload_bytes(b"Encrypted hello", self.e2ee_key)
+        ).decode("ascii")
+
+        with self.assertRaisesRegex(ValueError, "Encrypted messages require WOODWIRE_E2EE_KEY"):
+            bot.handle_message(build_message(encrypted_text, schema_version=2))
 
     def test_audio_attachment_falls_back_to_text_only_when_voice_engine_unavailable(self) -> None:
         sqs_client = Mock()

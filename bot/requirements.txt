@@ -1,1 +1,2 @@
 boto3>=1.39,<2
+cryptography>=49.0.0,<50

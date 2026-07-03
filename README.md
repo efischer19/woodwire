@@ -80,6 +80,10 @@ attachment paths to `http://127.0.0.1:8080/process` unless you override
 `OPENCLAW_URL` or the `OPENCLAW_HOST` / `OPENCLAW_PORT` / `OPENCLAW_PATH`
 variables.
 
+To enable client-side end-to-end encryption, also set `WOODWIRE_E2EE_KEY` to
+the same 32-byte base64 encoded AES-256-GCM key that you save in the PWA
+settings. The Worker never receives this key.
+
 For a manual end-to-end smoke test without a local LLM, set `AI_BACKEND=mock`
 and run:
 

@@ -20,6 +20,7 @@ from bot.main import (
     combine_message_text,
     decrypt_payload_bytes,
     encrypt_payload_bytes,
+    load_local_env_file,
     read_schema_version,
 )
 from bot.voice import VoiceEngineUnavailableError
@@ -596,6 +597,42 @@ class WoodwireBotTests(unittest.TestCase):
         # Function should return the version without error
         # The unsupported version check happens in handle_message
         self.assertEqual(read_schema_version(payload), 999)
+
+    def test_load_local_env_file_sets_e2ee_key_for_bot_config(self) -> None:
+        encoded_key = base64.b64encode(self.e2ee_key).decode("ascii")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_path = os.path.join(temp_dir, ".env")
+            with open(env_path, "w", encoding="utf-8") as handle:
+                handle.write(f"WOODWIRE_E2EE_KEY={encoded_key}\n")
+
+            environ = {
+                "AWS_ACCESS_KEY_ID": self.config.aws_access_key_id,
+                "AWS_REGION": self.config.aws_region,
+                "AWS_SECRET_ACCESS_KEY": self.config.aws_secret_access_key,
+                "S3_BUCKET_NAME": self.config.s3_bucket_name,
+                "SQS_QUEUE_URL": self.config.sqs_queue_url,
+            }
+
+            load_local_env_file(env_path, environ=environ)
+            config = BotConfig.from_env(environ)
+
+        self.assertEqual(config.e2ee_key, self.e2ee_key)
+
+    def test_load_local_env_file_does_not_override_existing_env(self) -> None:
+        first_key = base64.b64encode(self.e2ee_key).decode("ascii")
+        second_key = base64.b64encode(bytes(reversed(self.e2ee_key))).decode("ascii")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_path = os.path.join(temp_dir, ".env")
+            with open(env_path, "w", encoding="utf-8") as handle:
+                handle.write(f"WOODWIRE_E2EE_KEY={second_key}\n")
+
+            environ = {"WOODWIRE_E2EE_KEY": first_key}
+
+            load_local_env_file(env_path, environ=environ)
+
+        self.assertEqual(environ["WOODWIRE_E2EE_KEY"], first_key)
 
 
 if __name__ == "__main__":

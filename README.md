@@ -84,6 +84,20 @@ To enable client-side end-to-end encryption, also set `WOODWIRE_E2EE_KEY` to
 the same 32-byte base64 encoded AES-256-GCM key that you save in the PWA
 settings. The Worker never receives this key.
 
+For local bot runs, you can place the bot settings in a repository-local `.env`
+file instead of exporting them in your shell. `bot/main.py` loads `.env` before
+reading AWS, backend, and `WOODWIRE_E2EE_KEY` settings. For example:
+
+```dotenv
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key
+AWS_REGION=us-east-1
+SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/123456789012/woodwire-chat
+S3_BUCKET_NAME=woodwire-chat
+WOODWIRE_E2EE_KEY=base64-encoded-32-byte-key
+AI_BACKEND=mock
+```
+
 For a manual end-to-end smoke test without a local LLM, set `AI_BACKEND=mock`
 and run:
 

@@ -104,17 +104,16 @@ and run:
 ```sh
 cd bot
 uv sync
-uv run python main.py
+source .venv/bin/activate
+python main.py
 ```
 
-Alternatively, if you prefer to use your system's Python directly, you can
-run:
+Alternatively, you can use `uv run` with an explicit Python path:
 
 ```sh
 cd bot
 uv sync
-source .venv/bin/activate
-python main.py
+uv run -- env PYTHONPATH=.. python main.py
 ```
 
 Voice memo processing is enabled automatically for `audio/webm`, `audio/mp4`,

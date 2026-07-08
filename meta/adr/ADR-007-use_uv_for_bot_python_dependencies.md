@@ -11,7 +11,7 @@ tags:
 
 ## Context
 
-* **Problem:** The bot's Python dependencies were previously managed using standard `pip` with a `requirements.txt` file. This approach lacks deterministic builds, version locking, and performance for dependency resolution. Additionally, maintaining multiple dependency management systems across the Python ecosystem (bot vs. docs) creates unnecessary friction and inconsistency.
+* **Problem:** The bot's Python dependencies were previously managed using standard `pip` with a `requirements.txt` file. This approach lacks deterministic builds, version locking, and performance for dependency resolution. As the project grows, a modern dependency management solution becomes increasingly important for maintainability and reproducibility.
 
 * **Constraints:** The bot must maintain compatibility with Python 3.11+, support optional voice processing features (faster-whisper, piper), and cleanly handle fallback to text-only modes when optional system dependencies (ffmpeg) are missing. The migration must not break existing CI/CD workflows or development workflows.
 
@@ -68,7 +68,7 @@ The bot's Python environment will be managed using `uv` (an ultra-fast Python pa
   - **Ecosystem Immaturity (Mitigated):** While `uv` is younger than pip, it has been adopted by major projects (e.g., Ruff itself) and maintains compatibility with standard Python packaging formats.
 
 * **Future Implications:**
-  - If other Python sub-projects (e.g., documentation tooling) are added, they should also use `uv` for consistency.
+  - If additional Python sub-projects are added to the repository, they should also consider using `uv` for consistency.
   - The `uv.lock` file should be committed to version control to enable deterministic builds for CI and reproducible local development.
   - The bot's `requirements.txt` can be deprecated; all dependency information is now centralized in `pyproject.toml`.
   - Future bot dependency updates will be easier to track and audit via lockfile changes.

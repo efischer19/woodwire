@@ -32,7 +32,7 @@ The bot's Python environment will be managed using `uv` (an ultra-fast Python pa
     * *Cons:*
       - Requires developers and CI to install and use a new tool
       - Slight learning curve for developers not familiar with modern Python packaging
-      - Still relatively newer in the ecosystem compared to pip, though rapidly gaining adoption
+      - Newer tool compared to pip, though increasingly adopted by major projects in the ecosystem
 
 2. **Poetry:** A popular Python dependency management tool with built-in build system.
     * *Pros:*

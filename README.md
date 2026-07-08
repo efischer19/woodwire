@@ -102,8 +102,19 @@ For a manual end-to-end smoke test without a local LLM, set `AI_BACKEND=mock`
 and run:
 
 ```sh
-export AI_BACKEND=mock
-python bot/main.py
+cd bot
+uv sync
+uv run python main.py
+```
+
+Alternatively, if you prefer to use your system's Python directly, you can
+run:
+
+```sh
+cd bot
+uv sync
+source .venv/bin/activate
+python main.py
 ```
 
 Voice memo processing is enabled automatically for `audio/webm`, `audio/mp4`,
@@ -124,6 +135,15 @@ pip install pre-commit
 pre-commit run --all-files
 npx --yes markdownlint-cli2 "**/*.md"
 npx --yes htmlhint "src/**/*.html"
+```
+
+To install and verify bot dependencies locally using `uv`:
+
+```bash
+cd bot
+uv sync
+source .venv/bin/activate
+python -m unittest discover -s tests -v
 ```
 
 ### 7. Verify CI

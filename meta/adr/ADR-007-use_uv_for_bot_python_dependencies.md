@@ -32,7 +32,7 @@ The bot's Python environment will be managed using `uv` (an ultra-fast Python pa
     * *Cons:*
       - Requires developers and CI to install and use a new tool
       - Slight learning curve for developers not familiar with modern Python packaging
-      - Currently less mature than pip, though rapidly gaining adoption in the ecosystem
+      - Still relatively newer in the ecosystem compared to pip, though rapidly gaining adoption
 
 2. **Poetry:** A popular Python dependency management tool with built-in build system.
     * *Pros:*
@@ -65,7 +65,7 @@ The bot's Python environment will be managed using `uv` (an ultra-fast Python pa
 * **Negative:**
   - **New Dependency:** Developers must install `uv`. However, it is a single, standalone binary that is trivial to install.
   - **Transition Effort:** CI workflows and README documentation must be updated to reflect the new workflow.
-  - **Ecosystem Immaturity (Mitigated):** While `uv` is younger than pip, it has been adopted by major projects (e.g., Ruff itself) and maintains compatibility with standard Python packaging formats.
+  - **Path Configuration:** Tests and bot execution require PYTHONPATH configuration because the bot is a package located in a subdirectory.
 
 * **Future Implications:**
   - If additional Python sub-projects are added to the repository, they should also consider using `uv` for consistency.

@@ -108,12 +108,12 @@ source .venv/bin/activate
 python main.py
 ```
 
-Alternatively, you can use `uv run` with an explicit Python path:
+Alternatively, you can use `uv run` with the parent directory in PYTHONPATH:
 
 ```sh
 cd bot
 uv sync
-uv run -- env PYTHONPATH=.. python main.py
+PYTHONPATH=.. uv run python main.py
 ```
 
 Voice memo processing is enabled automatically for `audio/webm`, `audio/mp4`,

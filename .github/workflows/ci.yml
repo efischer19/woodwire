@@ -224,6 +224,8 @@ jobs:
         run: cd bot && uv sync
 
       - name: Run tests
+        # Tests need PYTHONPATH=.. because bot/ is a package with imports like `from bot.main`,
+        # which require the repository root to be in the Python path.
         run: cd bot && PYTHONPATH=.. uv run -- python -m unittest discover -s tests -v
 
   cfn-lint:

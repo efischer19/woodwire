@@ -849,7 +849,7 @@ voice = [
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.39,<2" },
-    { name = "cryptography", specifier = ">=49.0.0,<50" },
+    { name = "cryptography", specifier = ">=49,<50" },
     { name = "faster-whisper", marker = "extra == 'voice'", specifier = ">=1.0.0,<2" },
     { name = "piper-tts", marker = "extra == 'voice'", specifier = ">=1.0.0,<2" },
 ]

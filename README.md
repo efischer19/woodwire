@@ -2,13 +2,13 @@
 
 > Secure, asynchronous chat between a static web app and a local AI bot.
 
-**[🚀 Quick Start](./QUICK_START.md)** | **[🤖 OpenClaw](https://github.com/jatincpl/openclaw)** | **[📚 Architecture](#architecture-overview)** | **[🔗 Docs](#documentation)**
-
 Woodwire is an event-driven system for private, multimodal communication between a browser-based PWA and a local bot process. The frontend stays static and credential-free, while a Cloudflare Worker and AWS services coordinate message flow.
+
+**[🚀 Quick Start](./QUICK_START.md)** | **[🤖 OpenClaw](https://github.com/openclaw/openclaw)** | **[📚 Architecture](#architecture-overview)** | **[🔗 Docs](#documentation)**
 
 ## About the Name
 
-Woodwire captures the spirit of this project: "I'm the type who would build a wood cabin in the mountains—except instead of solitude, there's a telephone line to my local AI." The name evokes both the analog simplicity of a cabin phone line and the digital connection to an AI that lives on your own machine. It's intimate, private, and entirely yours.
+`Woodwire` captures the spirit of this project. I'm the type who would choose build a wood cabin in the mountains — except in this case it's not a cabin, it's a "wooden" telephone line to my local AI. The name evokes both the analog simplicity of a cabin phone line and the digital connection to an AI that lives on your own machine.
 
 ## This is an OpenClaw Channel
 
@@ -166,7 +166,6 @@ This project is licensed under the [MIT License](./LICENSE.md).
 
 ## Resources
 
-- [GitHub OpenClaw](https://github.com/jatincpl/openclaw) — Local LLM backend
+- [GitHub OpenClaw](https://github.com/openclaw/openclaw) — Local LLM backend
 - [Cloudflare Workers Documentation](https://developers.cloudflare.com/workers/)
 - [AWS CloudFormation Documentation](https://docs.aws.amazon.com/cloudformation/)
-- [WCAG 2.1 Accessibility Guidelines](https://www.w3.org/WAI/WCAG21/quickref/)

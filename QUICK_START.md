@@ -104,7 +104,7 @@ Edit `worker/wrangler.toml` and set:
 
 ```toml
 [env.production]
-vars = { 
+vars = {
   AWS_REGION = "us-east-1",
   CHAT_QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/123456789012/woodwire-chat",
   CHAT_BUCKET_NAME = "woodwire-chat-bucket-your-org-id",

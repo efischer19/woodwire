@@ -72,4 +72,3 @@ The bot's Python environment will be managed using `uv` (an ultra-fast Python pa
   - The `uv.lock` file should be committed to version control to enable deterministic builds for CI and reproducible local development.
   - The bot's `requirements.txt` can be deprecated; all dependency information is now centralized in `pyproject.toml`.
   - Future bot dependency updates will be easier to track and audit via lockfile changes.
-

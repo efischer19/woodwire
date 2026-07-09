@@ -1,6 +1,8 @@
-# Contributing to {{PROJECT_NAME}}
+# Contributing to Woodwire
 
-First off, thank you for your interest in contributing! We're excited you're here.
+> **Note:** Woodwire was built for personal use. While you're welcome to clone, fork, and use it, expect limited maintenance and active support. This project is shared "as-is" for educational purposes and personal projects. If you find bugs or have ideas, feel free to open an issue—but understand that responses may be infrequent.
+
+Thank you for your interest in contributing! If you choose to help improve this project, please follow the guidelines below.
 
 ## Development Philosophy
 

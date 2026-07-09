@@ -4,254 +4,168 @@
 
 Woodwire is an event-driven system for private, multimodal communication between a browser-based PWA and a local bot process. The frontend stays static and credential-free, while a Cloudflare Worker and AWS services coordinate message flow.
 
+**[🚀 Quick Start](./QUICK_START.md)** | **[🤖 OpenClaw](https://github.com/openclaw/openclaw)** | **[📚 Architecture](#architecture-overview)** | **[🔗 Docs](#documentation)**
+
+## About the Name
+
+`Woodwire` captures the spirit of this project. I'm the type who would choose build a wood cabin in the mountains — except in this case it's not a cabin, it's a "wooden" telephone line to my local AI. The name evokes both the analog simplicity of a cabin phone line and the digital connection to an AI that lives on your own machine.
+
+## This is an OpenClaw Channel
+
+While Woodwire supports multiple AI backends (OpenClaw, Ollama, or mock), it's designed with **OpenClaw** as the first-class integration. If you're looking for a secure, locally-hosted chat interface for OpenClaw, Woodwire is built for you.
+
+## Key Features
+
+- **Private & Encrypted** — Messages stay in your control; optional client-side AES-256-GCM encryption
+- **Credential-Free Frontend** — Static PWA with no hardcoded secrets; all auth happens at the edge
+- **Zero-Trust Gateway** — Cloudflare Worker validates every request with a shared passphrase
+- **Multimodal** — Text, images, audio attachments; automatic voice transcription and synthesis
+- **Outbound-Only Bot** — Local bot never exposes ports; all communication is pull-based via SQS + S3
+- **No Build Required** — Frontend is vanilla HTML/CSS/JS; deploy directly to S3/CloudFront or GitHub Pages
+- **Infrastructure as Code** — CloudFormation templates for reproducible AWS deployments
+
 ## Architecture Overview
 
-For full implementation details, see [`/meta/plans/`](./meta/plans/), especially the [epic executive summary](./meta/plans/epic-woodwire/00-executive-summary.md).
+### Message Flow: Inbound Pipeline (Browser → Bot)
 
 ```text
-[ Static PWA ]  ──────►  [ Cloudflare Worker ]  ──────►  [ AWS SQS Queue ]
-  (S3/CloudFront)          · Passphrase auth               · Event buffer
-                           · AWS secret injection           · Long-poll delivery
-                           · Pre-signed URL gen                    │
-                                                                   ▼
-[ Private S3 ]  ◄────────  [ PWA polls Worker ]           [ Local Bot ]
-  · outbox/ (AI replies)     for response status            · Outbound-only
-  · attachments/                                            · OpenClaw/Ollama
+┌─────────────────────────────────────────────────────────────────┐
+│                    INBOUND PIPELINE                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  [ Browser PWA ]  ──► [ Cloudflare Worker ]  ──► [ AWS SQS ]   │
+│    (Static)           (Zero-trust auth)         (Event buffer)  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+  1. User sends message from PWA
+  2. Worker validates X-Woodwire-Auth header
+  3. Message is forwarded to SQS queue
+  4. Local bot polls SQS and processes
 ```
 
-## Repository Structure
+### Message Flow: Outbound Pipeline (Bot → Browser)
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                    OUTBOUND PIPELINE                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  [ Local Bot ]  ──► [ Private S3 Bucket ]  ──► [ Browser polls]│
+│   (OpenClaw/etc)     (outbox/ responses)       (via Worker)     │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+  1. Bot processes inbound message
+  2. Bot writes response to S3 outbox/
+  3. Browser polls Worker for status
+  4. Worker retrieves response from S3 and returns to browser
+```
+
+### Repository Structure
 
 Woodwire follows the monorepo layout defined in [ADR-006](./meta/adr/ADR-006-monorepo_structure.md):
 
 ```text
 woodwire/
-├── src/              # PWA frontend (HTML/CSS/JS) — deploys to S3
-├── bot/              # Local Python bot — runs on user's machine
-├── worker/           # Cloudflare Worker source — deploys to Cloudflare
-├── infra/            # IaC templates (CloudFormation/Terraform)
-├── meta/             # ADRs, plans, philosophy docs
-└── .github/workflows # CI/CD for all artifacts
+├── src/              # PWA frontend (HTML/CSS/JS) → deploys to S3/CloudFront
+├── bot/              # Local Python bot (SQS poller, LLM orchestrator)
+├── worker/           # Cloudflare Worker source (zero-trust gateway)
+├── infra/            # AWS CloudFormation templates (IaC)
+├── meta/             # ADRs, design docs, philosophy
+└── .github/          # CI/CD workflows
 ```
 
-## Deploy Your Own (Quickstart)
+## Documentation
 
-1. Review architecture and sequencing in [`meta/plans/epic-woodwire/`](./meta/plans/epic-woodwire/).
-2. Provision AWS resources (S3, SQS, IAM) from the infra templates and plan docs.
-3. Deploy the Cloudflare Worker with passphrase auth and SQS forwarding.
-4. Run the local bot and point it at your queue and storage config.
-5. Deploy `src/` as the static PWA frontend.
+Each component has its own detailed documentation:
 
-### Provision the Chat Bucket
+- **[QUICK_START.md](./QUICK_START.md)** — Setup guide from AWS account to running chat
+- **[src/README.md](./src/README.md)** — Frontend architecture, accessibility, conventions
+- **[worker/README.md](./worker/README.md)** — Cloudflare Worker API contract, auth, deployment
+- **[bot/README.md](./bot/README.md)** — Local bot setup, AI backends, voice support, troubleshooting
+- **[infra/README.md](./infra/README.md)** — AWS infrastructure stacks, IAM setup, parameters
 
-Provision the private chat bucket stack in `infra/woodwire-chat-bucket.yaml`
-before wiring up IAM policies or Worker pre-signed URL generation. The stack
-outputs `ChatBucketName` and `ChatBucketArn` for those downstream
-configurations. Choose a globally unique S3 bucket name when setting
-`ChatBucketName`.
+## Quick Start
 
-```sh
-aws cloudformation deploy \
-  --stack-name woodwire-chat-bucket \
-  --template-file infra/woodwire-chat-bucket.yaml \
-  --parameter-overrides \
-    ChatBucketName=woodwire-chat-bucket-your-org-id \
-    AllowedCorsOrigin=https://app.example.com
-```
+To get up and running:
 
-### Provision the Chat Queue
+1. **[Follow the QUICK_START.md](./QUICK_START.md)** for step-by-step AWS, Worker, bot, and PWA setup
 
-Provision the primary SQS queue and its dead-letter queue in
-`infra/woodwire-chat-queue.yaml` before deploying IAM policies, the Worker, or
-the local bot. The stack outputs `ChatQueueUrl`, `ChatQueueArn`, and
-`ChatDeadLetterQueueArn` for those downstream configurations.
+2. Or skip to component-specific docs:
+   - Setting up AWS? See [infra/README.md](./infra/README.md)
+   - Deploying the Worker? See [worker/README.md](./worker/README.md)
+   - Running the bot? See [bot/README.md](./bot/README.md)
+   - Customizing the frontend? See [src/README.md](./src/README.md)
 
-```sh
-aws cloudformation deploy \
-  --stack-name woodwire-chat-queue \
-  --template-file infra/woodwire-chat-queue.yaml \
-  --parameter-overrides \
-    ChatQueueName=woodwire-chat
-```
-
-### Run the Local Bot
-
-The bot defaults to the `openclaw` backend and will POST messages plus local
-attachment paths to `http://127.0.0.1:8080/process` unless you override
-`OPENCLAW_URL` or the `OPENCLAW_HOST` / `OPENCLAW_PORT` / `OPENCLAW_PATH`
-variables.
-
-To enable client-side end-to-end encryption, also set `WOODWIRE_E2EE_KEY` to
-the same 32-byte base64 encoded AES-256-GCM key that you save in the PWA
-settings. The Worker never receives this key.
-
-For local bot runs, you can place the bot settings in a repository-local `.env`
-file instead of exporting them in your shell. `bot/main.py` loads `.env` before
-reading AWS, backend, and `WOODWIRE_E2EE_KEY` settings. For example:
-
-```dotenv
-AWS_ACCESS_KEY_ID=your-access-key
-AWS_SECRET_ACCESS_KEY=your-secret-key
-AWS_REGION=us-east-1
-SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/123456789012/woodwire-chat
-S3_BUCKET_NAME=woodwire-chat
-WOODWIRE_E2EE_KEY=base64-encoded-32-byte-key
-AI_BACKEND=mock
-```
-
-For a manual end-to-end smoke test without a local LLM, set `AI_BACKEND=mock`
-and run:
-
-```sh
-cd bot
-uv sync
-source .venv/bin/activate
-python main.py
-```
-
-Alternatively, you can use `uv run` with the parent directory in PYTHONPATH:
-
-```sh
-cd bot
-uv sync
-PYTHONPATH=.. uv run python main.py
-```
-
-Voice memo processing is enabled automatically for `audio/webm`, `audio/mp4`,
-and `audio/ogg` attachments when local STT/TTS tooling is installed. The bot
-expects `ffmpeg` on `PATH`, uses `STT_ENGINE` (defaults to `faster-whisper`)
-for transcription, and uses `TTS_ENGINE` (defaults to `piper`) for speech
-synthesis. To enable Piper, set `PIPER_MODEL_PATH` to your local voice model
-file; the bot also honors `PIPER_MODEL` as a fallback alias when
-`PIPER_MODEL_PATH` is unset. If those optional engines are unavailable, the bot
-logs a warning and falls back to text-only processing without uploading an MP3
-response. Budget at least 2 GB RAM and roughly 2 GB of disk space for local
-voice models on Raspberry Pi-class hardware.
+## Development
 
 ### Local Quality Checks
 
+Before committing, run the project's linters and tests:
+
 ```bash
+# Pre-commit hooks
 pip install pre-commit
 pre-commit run --all-files
+
+# Markdown linting
 npx --yes markdownlint-cli2 "**/*.md"
+
+# HTML linting
 npx --yes htmlhint "src/**/*.html"
-```
 
-To install and verify bot dependencies locally using `uv`:
-
-```bash
+# Bot unit tests
 cd bot
 uv sync
-source .venv/bin/activate
 python -m unittest discover -s tests -v
+
+# Worker tests
+cd worker
+npm test
 ```
 
-### 7. Verify CI
+### Development Philosophy
 
-Push a change or open a pull request to confirm the CI workflow runs and passes in your new repository.
+Development standards and contributor expectations are documented in [meta/DEVELOPMENT_PHILOSOPHY.md](./meta/DEVELOPMENT_PHILOSOPHY.md). Please read this before contributing.
 
-### 8. Enable GitHub Pages Deployment
+### Architecture Decisions
 
-This template includes `.github/workflows/deploy-pages.yml`, which deploys `src/` to GitHub Pages on pushes to `main` and supports manual `workflow_dispatch`.
+This project uses [Architecture Decision Records (ADRs)](./meta/adr/ADR-001-use_adrs.md) to document significant design choices. Before proposing a major change, review existing ADRs in [meta/adr/](./meta/adr/).
 
-To enable it in your new repository:
+## Encryption & Security
 
-1. Go to **Settings → Pages**
-2. Under **Build and deployment**, set **Source** to **GitHub Actions**
-3. (Optional but recommended) In **Settings → Environments → github-pages**, configure environment protection rules as needed
-4. Push to `main` (or run the **Deploy to GitHub Pages** workflow manually) to publish your site
+### Client-Side E2EE (Schema Version 2)
 
-### 9. Opting into AWS Deployment
+Optional AES-256-GCM encryption between browser and bot:
 
-This repository includes a `.github/workflows/deploy-aws.yml` workflow that deploys `src/` to an AWS S3 bucket and invalidates a CloudFront distribution. It runs on manual `workflow_dispatch` and on pushes to `main` when files under `src/` change. If you add a build step later, update the S3 sync source path in the workflow by following the commented Node/build example in `.github/workflows/deploy-aws.yml`.
+```bash
+# Generate a 32-byte base64 key
+openssl rand -base64 32
 
-#### Required AWS Resources
+# Set on bot
+export WOODWIRE_E2EE_KEY=your-base64-key
+python bot/main.py
 
-Before enabling this workflow, provision the following AWS resources. The IAM
-users, managed policies, GitHub Actions OIDC role, and the $1.00 billing alarm
-can be created with `infra/woodwire-iam.yaml` by deploying the stack in
-`us-east-1`:
-
-```sh
-aws cloudformation deploy \
-  --stack-name woodwire-iam \
-  --template-file infra/woodwire-iam.yaml \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region us-east-1 \
-  --parameter-overrides \
-    ProjectName=woodwire \
-    ChatBucketName=woodwire-chat-bucket \
-    ChatQueueArn=arn:aws:sqs:us-east-1:123456789012:woodwire-chat \
-    PwaHostingBucketName=woodwire-pwa \
-    CloudFrontDistributionId=E1ABCDEF2GHIJK \
-    GitHubRepositoryOwner=YOUR_GITHUB_USERNAME \
-    GitHubRepositoryName=woodwire \
-    GitHubOidcProviderArn=arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com \
-    BillingAlarmSnsTopicArn=arn:aws:sns:us-east-1:123456789012:woodwire-billing-alerts
+# Set in PWA settings (exact same key)
 ```
 
-After the stack finishes, copy the `GitHubActionsRoleArn` output into the
-`AWS_ROLE_ARN` repository variable. Create long-lived access keys manually for
-the `LocalBotAccessKeyUserName` and `CloudflareWorkerAccessKeyUserName`
-outputs, then store those credentials outside this repository.
+The Cloudflare Worker **intentionally does not** receive this key—it never has the ability to decrypt messages.
 
-| Resource | Description |
-| :--- | :--- |
-| **S3 bucket** | Stores the static site files |
-| **CloudFront distribution** | Serves the site from S3 with HTTPS and caching |
-| **GitHub OIDC identity provider** | Allows GitHub Actions to authenticate with AWS without static keys |
-| **IAM role** | Created by `infra/woodwire-iam.yaml`; trusted by the OIDC provider and scoped to S3 deploys plus CloudFront invalidations |
+### Schema Version 1 (Legacy, Unencrypted)
 
-#### GitHub Repository Variables
+For backwards compatibility, unencrypted messages continue to work.
 
-Configure the following in **Settings → Secrets and variables → Actions → Variables**:
+## Contributing
 
-| Variable | Description | Example |
-| :--- | :--- | :--- |
-| `AWS_ROLE_ARN` | ARN of the IAM role GitHub Actions will assume via OIDC | `arn:aws:iam::123456789012:role/my-deploy-role` |
-| `AWS_REGION` | AWS region where your resources live (defaults to `us-east-1` if unset) | `us-west-2` |
-| `S3_BUCKET_NAME` | Name of the S3 bucket to sync the site into | `my-project-static-site` |
-| `CLOUDFRONT_DISTRIBUTION_ID` | ID of the CloudFront distribution to invalidate after deploy | `E1ABCDEF2GHIJK` |
+This project was built for personal use. While you're welcome to clone, fork, and use it, expect limited maintenance. For bugs, ideas, or questions, feel free to open an issue—but understand that responses may be infrequent.
 
-#### Enabling the Workflow
-
-1. Provision the AWS resources listed above.
-2. Add the repository variables from the **GitHub Repository Variables** table above in **Settings → Secrets and variables → Actions → Variables**.
-3. Go to **Actions → Deploy to AWS (S3 + CloudFront)** and click **Run workflow** to trigger a manual deployment.
-4. Push a change to `src/` on `main` to use the automatic path-scoped deployment.
-
-> **Note:** The GitHub Pages workflow (`.github/workflows/deploy-pages.yml`) remains the default deployment path and is unaffected by this workflow.
-
-### 10. Opting into Cloudflare Worker Deployment
-
-This repository also includes `.github/workflows/deploy-worker.yml`, a Cloudflare Worker deployment workflow. It runs on manual `workflow_dispatch` and on pushes to `main` when files under `worker/` change. The workflow installs the official `wrangler` CLI with `npm` and deploys with a GitHub Actions secret-backed API token.
-
-#### GitHub Repository Secret
-
-Configure the following in **Settings → Secrets and variables → Actions → Secrets**:
-
-| Secret | Description |
-| :--- | :--- |
-| `CLOUDFLARE_API_TOKEN` | Cloudflare API token with permission to deploy the Worker |
-
-#### GitHub Repository Variable
-
-Configure the following in **Settings → Secrets and variables → Actions → Variables**:
-
-| Variable | Description | Example |
-| :--- | :--- | :--- |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account identifier used by `wrangler deploy` | `0123456789abcdef0123456789abcdef` |
-
-#### Enabling the Workflow
-
-1. Add the `CLOUDFLARE_API_TOKEN` secret and `CLOUDFLARE_ACCOUNT_ID` variable.
-2. Scaffold the Worker project under `worker/` with a `wrangler.toml` (or `wrangler.json` / `wrangler.jsonc`) file.
-3. Go to **Actions → Deploy Cloudflare Worker** and click **Run workflow** to trigger a manual deployment.
-4. Push a change to `worker/` on `main` to use the automatic path-scoped deployment.
-
-## Design Principles
-
-Development standards and contributor expectations are documented in [`meta/DEVELOPMENT_PHILOSOPHY.md`](./meta/DEVELOPMENT_PHILOSOPHY.md).
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for more details.
 
 ## License
 
 This project is licensed under the [MIT License](./LICENSE.md).
+
+## Resources
+
+- [GitHub OpenClaw](https://github.com/openclaw/openclaw) — Local LLM backend
+- [Cloudflare Workers Documentation](https://developers.cloudflare.com/workers/)
+- [AWS CloudFormation Documentation](https://docs.aws.amazon.com/cloudformation/)

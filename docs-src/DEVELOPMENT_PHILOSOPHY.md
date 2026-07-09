@@ -1,1 +1,0 @@
-../meta/DEVELOPMENT_PHILOSOPHY.md

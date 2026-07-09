@@ -1,0 +1,15 @@
+[project]
+name = "woodwire-bot"
+version = "0.1.0"
+description = "Local Python bot for Woodwire secure chat system"
+requires-python = ">=3.11"
+dependencies = [
+    "boto3>=1.39,<2",
+    "cryptography>=49,<50",
+]
+
+[project.optional-dependencies]
+voice = [
+    "faster-whisper>=1.0.0,<2",
+    "piper-tts>=1.0.0,<2",
+]

@@ -54,17 +54,17 @@ jobs:
 
           echo "✅ Site synced successfully"
 
-      - name: Invalidate CloudFront cache
-        run: |
-          echo "🔄 Creating CloudFront invalidation for distribution: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}"
+      #- name: Invalidate CloudFront cache
+      #  run: |
+      #    echo "🔄 Creating CloudFront invalidation for distribution: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}"
 
-          INVALIDATION_ID=$(aws cloudfront create-invalidation \
-            --distribution-id "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}" \
-            --paths "/*" \
-            --query 'Invalidation.Id' \
-            --output text)
+      #    INVALIDATION_ID=$(aws cloudfront create-invalidation \
+      #      --distribution-id "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}" \
+      #      --paths "/*" \
+      #      --query 'Invalidation.Id' \
+      #      --output text)
 
-          echo "✅ Invalidation created: $INVALIDATION_ID"
+      #    echo "✅ Invalidation created: $INVALIDATION_ID"
 
       - name: Deployment summary
         if: always()
@@ -74,6 +74,5 @@ jobs:
           echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
           echo "| :---- | :---- |" >> $GITHUB_STEP_SUMMARY
           echo "| Bucket | \`s3://${{ vars.S3_BUCKET_NAME }}/\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Distribution | \`${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Triggered by | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY

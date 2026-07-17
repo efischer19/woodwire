@@ -1,11 +1,4 @@
-import {
-  GetObjectCommand,
-  ListObjectsV2Command,
-  PutObjectCommand,
-  S3Client,
-} from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
+import { AwsClient } from './aws4fetch.js';
 
 const AUTH_HEADER = 'X-Woodwire-Auth';
 const SECURITY_HEADERS = {
@@ -51,6 +44,13 @@ const DEFAULT_EXTENSION_BY_CONTENT_TYPE = {
   'text/csv': '.csv',
   'text/markdown': '.md',
   'text/plain': '.txt',
+};
+const XML_ENTITY_MAP = {
+  amp: '&',
+  apos: "'",
+  gt: '>',
+  lt: '<',
+  quot: '"',
 };
 
 export function createWorker(dependencies = {}) {
@@ -180,20 +180,27 @@ async function handleMessageRequest(request, env, dependencies) {
     return createResponse(request, env, 413, { error: 'Message payload is too large' });
   }
 
-  const sqsClient =
-    dependencies.createSqsClient?.(env) ??
-    new SQSClient({
-      credentials: buildAwsCredentials(env),
-      region: env.AWS_REGION ?? 'us-east-1',
+  try {
+    const awsClient = createAwsClient(env, dependencies);
+    const response = await awsClient.fetch(env.CHAT_QUEUE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
+      },
+      body: new URLSearchParams({
+        Action: 'SendMessage',
+        MessageBody: payloadString,
+        Version: '2012-11-05',
+      }).toString(),
+      aws: {
+        region: env.AWS_REGION ?? 'us-east-1',
+        service: 'sqs',
+      },
     });
 
-  try {
-    await sqsClient.send(
-      new SendMessageCommand({
-        MessageBody: payloadString,
-        QueueUrl: env.CHAT_QUEUE_URL,
-      }),
-    );
+    if (!response.ok) {
+      throw new Error('SQS send failed');
+    }
   } catch {
     return createResponse(request, env, 502, { error: 'Bad Gateway' });
   }
@@ -229,23 +236,24 @@ async function handleStatusRequest(request, env, context, dependencies) {
   }
 
   const prefix = `outbox/${conversationId}/`;
-  const s3Client = createS3Client(env, dependencies);
+  const region = env.AWS_REGION ?? 'us-east-1';
 
-  let listResponse;
+  let responseFiles;
 
   try {
-    listResponse = await s3Client.send(
-      new ListObjectsV2Command({
-        Bucket: env.CHAT_BUCKET_NAME,
-        MaxKeys: 25,
-        Prefix: prefix,
-      }),
+    const awsClient = createAwsClient(env, dependencies);
+    const objects = await listS3Objects(
+      awsClient,
+      env.CHAT_BUCKET_NAME,
+      prefix,
+      25,
+      region,
+      dependencies,
     );
+    responseFiles = describeResponseFiles(prefix, objects);
   } catch {
     return createResponse(request, env, 502, { error: 'Bad Gateway' });
   }
-
-  const responseFiles = describeResponseFiles(prefix, listResponse.Contents ?? []);
   const response = createResponse(
     request,
     env,
@@ -300,17 +308,20 @@ async function handleUploadUrlRequest(request, env, dependencies) {
   const objectId = crypto.randomUUID();
   const extension = getFilenameExtension(validation.filename, validation.contentType);
   const key = `attachments/${conversationId}/${timestamp}-${objectId}${extension}`;
-  const s3Client = createS3Client(env, dependencies);
+  const region = env.AWS_REGION ?? 'us-east-1';
 
   try {
-    const uploadUrl = await signS3Command(
-      s3Client,
-      new PutObjectCommand({
-        Bucket: env.CHAT_BUCKET_NAME,
-        ContentType: validation.contentType,
-        Key: key,
-      }),
+    const awsClient = createAwsClient(env, dependencies);
+    const uploadUrl = await createPresignedS3Url(
+      awsClient,
+      {
+        bucket: env.CHAT_BUCKET_NAME,
+        contentType: validation.contentType,
+        key,
+        method: 'PUT',
+      },
       UPLOAD_URL_EXPIRY_SECONDS,
+      region,
       dependencies,
     );
 
@@ -331,16 +342,19 @@ async function handleAttachmentRequest(request, env, dependencies) {
     return createResponse(request, env, 500, { error: 'Internal Server Error' });
   }
 
-  const s3Client = createS3Client(env, dependencies);
+  const region = env.AWS_REGION ?? 'us-east-1';
 
   try {
-    const downloadUrl = await signS3Command(
-      s3Client,
-      new GetObjectCommand({
-        Bucket: env.CHAT_BUCKET_NAME,
-        Key: key,
-      }),
+    const awsClient = createAwsClient(env, dependencies);
+    const downloadUrl = await createPresignedS3Url(
+      awsClient,
+      {
+        bucket: env.CHAT_BUCKET_NAME,
+        key,
+        method: 'GET',
+      },
       DOWNLOAD_URL_EXPIRY_SECONDS,
+      region,
       dependencies,
     );
 
@@ -363,48 +377,54 @@ async function handleResponseRequest(request, env, dependencies) {
   }
 
   const prefix = `outbox/${conversationId}/`;
-  const s3Client = createS3Client(env, dependencies);
-  let listResponse;
+  const region = env.AWS_REGION ?? 'us-east-1';
+  let responseFiles;
 
   try {
-    listResponse = await s3Client.send(
-      new ListObjectsV2Command({
-        Bucket: env.CHAT_BUCKET_NAME,
-        MaxKeys: 25,
-        Prefix: prefix,
-      }),
+    const awsClient = createAwsClient(env, dependencies);
+    const objects = await listS3Objects(
+      awsClient,
+      env.CHAT_BUCKET_NAME,
+      prefix,
+      25,
+      region,
+      dependencies,
     );
+    responseFiles = describeResponseFiles(prefix, objects);
   } catch {
     return createResponse(request, env, 502, { error: 'Bad Gateway' });
   }
-
-  const responseFiles = describeResponseFiles(prefix, listResponse.Contents ?? []);
 
   if (!responseFiles.audioKey && !responseFiles.transcriptKey) {
     return createResponse(request, env, 404, { error: 'Response not found' });
   }
 
   try {
+    const awsClient = createAwsClient(env, dependencies);
     const [audioUrl, transcriptUrl] = await Promise.all([
       responseFiles.audioKey
-        ? signS3Command(
-            s3Client,
-            new GetObjectCommand({
-              Bucket: env.CHAT_BUCKET_NAME,
-              Key: responseFiles.audioKey,
-            }),
+        ? createPresignedS3Url(
+            awsClient,
+            {
+              bucket: env.CHAT_BUCKET_NAME,
+              key: responseFiles.audioKey,
+              method: 'GET',
+            },
             DOWNLOAD_URL_EXPIRY_SECONDS,
+            region,
             dependencies,
           )
         : Promise.resolve(null),
       responseFiles.transcriptKey
-        ? signS3Command(
-            s3Client,
-            new GetObjectCommand({
-              Bucket: env.CHAT_BUCKET_NAME,
-              Key: responseFiles.transcriptKey,
-            }),
+        ? createPresignedS3Url(
+            awsClient,
+            {
+              bucket: env.CHAT_BUCKET_NAME,
+              key: responseFiles.transcriptKey,
+              method: 'GET',
+            },
             DOWNLOAD_URL_EXPIRY_SECONDS,
+            region,
             dependencies,
           )
         : Promise.resolve(null),
@@ -469,66 +489,6 @@ function describeResponseFiles(prefix, objects) {
     status,
     transcriptKey,
   };
-}
-
-async function fetchTranscript(s3Client, bucketName, key) {
-  const response = await s3Client.send(
-    new GetObjectCommand({
-      Bucket: bucketName,
-      Key: key,
-    }),
-  );
-
-  return readResponseBodyAsText(response.Body);
-}
-
-async function readResponseBodyAsText(body) {
-  if (!body) {
-    return '';
-  }
-
-  if (typeof body === 'string') {
-    return body;
-  }
-
-  if (body instanceof Uint8Array) {
-    return new TextDecoder().decode(body);
-  }
-
-  if (typeof body.transformToString === 'function') {
-    return body.transformToString();
-  }
-
-  if (typeof body.text === 'function') {
-    return body.text();
-  }
-
-  if (typeof body[Symbol.asyncIterator] === 'function') {
-    const chunks = [];
-
-    for await (const chunk of body) {
-      chunks.push(
-        typeof chunk === 'string'
-          ? new TextEncoder().encode(chunk)
-          : chunk instanceof Uint8Array
-            ? chunk
-            : new Uint8Array(chunk),
-      );
-    }
-
-    const totalLength = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
-    const combined = new Uint8Array(totalLength);
-    let offset = 0;
-
-    for (const chunk of chunks) {
-      combined.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-
-    return new TextDecoder().decode(combined);
-  }
-
-  throw new Error('Unsupported response body');
 }
 
 async function readJson(request) {
@@ -707,20 +667,88 @@ function getStatusCacheTtl(env) {
   return Math.min(STATUS_CACHE_MAX_SECONDS, Math.max(STATUS_CACHE_MIN_SECONDS, rawTtl));
 }
 
-function createS3Client(env, dependencies) {
+function createAwsClient(env, dependencies) {
+  const credentials = getRequiredAwsCredentials(env);
+
   return (
-    dependencies.createS3Client?.(env) ??
-    new S3Client({
-      credentials: buildAwsCredentials(env),
+    dependencies.createAwsClient?.(env) ??
+    new AwsClient({
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      sessionToken: credentials.sessionToken,
       region: env.AWS_REGION ?? 'us-east-1',
     })
   );
 }
 
-async function signS3Command(s3Client, command, expiresIn, dependencies) {
-  const signer = dependencies.signS3Url ?? getSignedUrl;
+async function listS3Objects(awsClient, bucket, prefix, maxKeys, region, dependencies) {
+  const listUrl = createS3Url(bucket);
+  listUrl.searchParams.set('list-type', '2');
+  listUrl.searchParams.set('max-keys', String(maxKeys));
+  listUrl.searchParams.set('prefix', prefix);
+  const fetchList = dependencies.fetchS3List ?? ((client, url, init) => client.fetch(url, init));
+  const response = await fetchList(awsClient, listUrl.toString(), {
+    method: 'GET',
+    aws: {
+      region,
+      service: 's3',
+    },
+  });
 
-  return signer(s3Client, command, { expiresIn });
+  if (!response.ok) {
+    throw new Error('S3 list failed');
+  }
+
+  const responseXml = await response.text();
+  const keys = [...responseXml.matchAll(/<Key>([^<]*)<\/Key>/g)].map((match) => ({
+    Key: decodeXmlText(match[1] ?? ''),
+  }));
+
+  return keys;
+}
+
+async function createPresignedS3Url(awsClient, request, expiresIn, region, dependencies) {
+  const url = createS3Url(request.bucket, request.key);
+  const signRequest = dependencies.signS3Request ?? ((client, input, init) => client.sign(input, init));
+  const signedRequest = await signRequest(awsClient, url.toString(), {
+    method: request.method,
+    headers: request.contentType ? { 'Content-Type': request.contentType } : undefined,
+    aws: {
+      expires: expiresIn,
+      region,
+      service: 's3',
+      signQuery: true,
+    },
+  });
+
+  return String(signedRequest.url);
+}
+
+function createS3Url(bucket, key = '') {
+  const baseUrl = new URL(`https://${bucket}.s3.amazonaws.com/`);
+
+  if (!key) {
+    return baseUrl;
+  }
+
+  baseUrl.pathname = `/${key.split('/').map((segment) => encodeURIComponent(segment)).join('/')}`;
+  return baseUrl;
+}
+
+function decodeXmlText(value) {
+  return value.replace(/&(#x?[0-9a-fA-F]+|amp|apos|gt|lt|quot);/g, (match, entity) => {
+    if (entity.startsWith('#x')) {
+      const codePoint = Number.parseInt(entity.slice(2), 16);
+      return Number.isNaN(codePoint) ? match : String.fromCodePoint(codePoint);
+    }
+
+    if (entity.startsWith('#')) {
+      const codePoint = Number.parseInt(entity.slice(1), 10);
+      return Number.isNaN(codePoint) ? match : String.fromCodePoint(codePoint);
+    }
+
+    return XML_ENTITY_MAP[entity] ?? match;
+  });
 }
 
 function parsePositiveInt(value, fallback) {
@@ -733,9 +761,9 @@ function parsePositiveInt(value, fallback) {
   return parsed;
 }
 
-function buildAwsCredentials(env) {
+function getRequiredAwsCredentials(env) {
   if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) {
-    return undefined;
+    throw new Error('Missing AWS credentials');
   }
 
   return {

@@ -1,5 +1,5 @@
 name = "woodwire-worker"
-main = "src/index.js"
+main = "index.js"
 compatibility_date = "2026-06-30"
 
 [observability.logs]

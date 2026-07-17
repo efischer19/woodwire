@@ -162,6 +162,11 @@ async function handleMessageRequest(request, env, dependencies) {
   if (!env.CHAT_QUEUE_URL) {
     return createResponse(request, env, 500, { error: 'Internal Server Error' });
   }
+  const awsConfigError = ensureAwsCredentialsConfigured(request, env);
+
+  if (awsConfigError) {
+    return awsConfigError;
+  }
 
   const conversationId = crypto.randomUUID();
   const schemaVersion = getMessageSchemaVersion(body.schemaVersion);
@@ -199,7 +204,7 @@ async function handleMessageRequest(request, env, dependencies) {
     });
 
     if (!response.ok) {
-      throw new Error('SQS send failed');
+      throw new Error(`SQS send failed with status ${response.status}`);
     }
   } catch {
     return createResponse(request, env, 502, { error: 'Bad Gateway' });
@@ -221,6 +226,11 @@ async function handleStatusRequest(request, env, context, dependencies) {
 
   if (!env.CHAT_BUCKET_NAME) {
     return createResponse(request, env, 500, { error: 'Internal Server Error' });
+  }
+  const awsConfigError = ensureAwsCredentialsConfigured(request, env);
+
+  if (awsConfigError) {
+    return awsConfigError;
   }
 
   const cache = dependencies.cache ?? globalThis.caches?.default;
@@ -302,6 +312,11 @@ async function handleUploadUrlRequest(request, env, dependencies) {
   if (!env.CHAT_BUCKET_NAME) {
     return createResponse(request, env, 500, { error: 'Internal Server Error' });
   }
+  const awsConfigError = ensureAwsCredentialsConfigured(request, env);
+
+  if (awsConfigError) {
+    return awsConfigError;
+  }
 
   const timestamp = dependencies.now?.() ?? Date.now();
   const conversationId = crypto.randomUUID();
@@ -341,6 +356,11 @@ async function handleAttachmentRequest(request, env, dependencies) {
   if (!env.CHAT_BUCKET_NAME) {
     return createResponse(request, env, 500, { error: 'Internal Server Error' });
   }
+  const awsConfigError = ensureAwsCredentialsConfigured(request, env);
+
+  if (awsConfigError) {
+    return awsConfigError;
+  }
 
   const region = env.AWS_REGION ?? 'us-east-1';
 
@@ -374,6 +394,11 @@ async function handleResponseRequest(request, env, dependencies) {
 
   if (!env.CHAT_BUCKET_NAME) {
     return createResponse(request, env, 500, { error: 'Internal Server Error' });
+  }
+  const awsConfigError = ensureAwsCredentialsConfigured(request, env);
+
+  if (awsConfigError) {
+    return awsConfigError;
   }
 
   const prefix = `outbox/${conversationId}/`;
@@ -696,11 +721,12 @@ async function listS3Objects(awsClient, bucket, prefix, maxKeys, region, depende
   });
 
   if (!response.ok) {
-    throw new Error('S3 list failed');
+    throw new Error(`S3 list failed with status ${response.status}`);
   }
 
   const responseXml = await response.text();
-  const keys = [...responseXml.matchAll(/<Key>([^<]*)<\/Key>/g)].map((match) => ({
+  // S3 returns a predictable ListBucketResult payload; we only need <Key> values.
+  const keys = [...responseXml.matchAll(/<Key>([\s\S]*?)<\/Key>/g)].map((match) => ({
     Key: decodeXmlText(match[1] ?? ''),
   }));
 
@@ -736,7 +762,8 @@ function createS3Url(bucket, key = '') {
 }
 
 function decodeXmlText(value) {
-  return value.replace(/&(#x?[0-9a-fA-F]+|amp|apos|gt|lt|quot);/g, (match, entity) => {
+  // S3 ListObjects XML encodes keys with standard XML entities and numeric references.
+  return value.replace(/&(#x[0-9a-fA-F]{1,8}|#[0-9]{1,10}|amp|apos|gt|lt|quot);/g, (match, entity) => {
     if (entity.startsWith('#x')) {
       const codePoint = Number.parseInt(entity.slice(2), 16);
       return Number.isNaN(codePoint) ? match : String.fromCodePoint(codePoint);
@@ -751,6 +778,14 @@ function decodeXmlText(value) {
   });
 }
 
+function ensureAwsCredentialsConfigured(request, env) {
+  if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) {
+    return createResponse(request, env, 500, { error: 'Internal Server Error' });
+  }
+
+  return null;
+}
+
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(value ?? '', 10);
 
@@ -763,7 +798,9 @@ function parsePositiveInt(value, fallback) {
 
 function getRequiredAwsCredentials(env) {
   if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) {
-    throw new Error('Missing AWS credentials');
+    throw new Error(
+      'Failed to create AWS client: missing required environment variables AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY',
+    );
   }
 
   return {

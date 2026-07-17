@@ -3,9 +3,9 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { createWorker, MAX_SQS_MESSAGE_BYTES } from './index.js';
 
 const baseEnv = {
-  AWS_ACCESS_KEY_ID: 'test-access-key',
+  AWS_ACCESS_KEY_ID: 'test-access-key-id',
   AWS_REGION: 'us-east-1',
-  AWS_SECRET_ACCESS_KEY: 'test-secret-key',
+  AWS_SECRET_ACCESS_KEY: 'test-secret-access-key',
   CHAT_BUCKET_NAME: 'woodwire-chat',
   CHAT_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123456789012/woodwire-chat',
   PWA_ORIGIN: 'https://app.example.com',
@@ -57,10 +57,10 @@ describe('Woodwire Worker', () => {
   });
 
   test('enqueues a message when the request is authenticated', async () => {
-    const fetch = vi.fn().mockResolvedValue(new Response('<SendMessageResponse />', { status: 200 }));
+    const mockFetch = vi.fn().mockResolvedValue(new Response('<SendMessageResponse />', { status: 200 }));
     const worker = createWorker({
       createAwsClient: () => ({
-        fetch,
+        fetch: mockFetch,
       }),
     });
     vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('conversation-123');
@@ -85,13 +85,13 @@ describe('Woodwire Worker', () => {
       conversationId: 'conversation-123',
       status: 'pending',
     });
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0][0]).toBe(baseEnv.CHAT_QUEUE_URL);
-    expect(fetch.mock.calls[0][1].method).toBe('POST');
-    expect(fetch.mock.calls[0][1].headers).toEqual({
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0][0]).toBe(baseEnv.CHAT_QUEUE_URL);
+    expect(mockFetch.mock.calls[0][1].method).toBe('POST');
+    expect(mockFetch.mock.calls[0][1].headers).toEqual({
       'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
     });
-    const sentBody = new URLSearchParams(fetch.mock.calls[0][1].body);
+    const sentBody = new URLSearchParams(mockFetch.mock.calls[0][1].body);
     expect(sentBody.get('Action')).toBe('SendMessage');
     expect(sentBody.get('Version')).toBe('2012-11-05');
     expect(JSON.parse(sentBody.get('MessageBody'))).toMatchObject({
@@ -103,10 +103,10 @@ describe('Woodwire Worker', () => {
   });
 
   test('preserves schema version 2 for encrypted message payloads', async () => {
-    const fetch = vi.fn().mockResolvedValue(new Response('<SendMessageResponse />', { status: 200 }));
+    const mockFetch = vi.fn().mockResolvedValue(new Response('<SendMessageResponse />', { status: 200 }));
     const worker = createWorker({
       createAwsClient: () => ({
-        fetch,
+        fetch: mockFetch,
       }),
     });
     vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('conversation-123');
@@ -125,7 +125,7 @@ describe('Woodwire Worker', () => {
     );
 
     expect(response.status).toBe(202);
-    const sentBody = new URLSearchParams(fetch.mock.calls[0][1].body);
+    const sentBody = new URLSearchParams(mockFetch.mock.calls[0][1].body);
     expect(JSON.parse(sentBody.get('MessageBody'))).toMatchObject({
       schemaVersion: 2,
       text: 'encrypted-ciphertext',
@@ -154,10 +154,10 @@ describe('Woodwire Worker', () => {
   });
 
   test('rejects a message payload that exceeds the 256 KB SQS limit', async () => {
-    const fetch = vi.fn().mockResolvedValue(new Response('<SendMessageResponse />', { status: 200 }));
+    const mockFetch = vi.fn().mockResolvedValue(new Response('<SendMessageResponse />', { status: 200 }));
     const worker = createWorker({
       createAwsClient: () => ({
-        fetch,
+        fetch: mockFetch,
       }),
     });
     vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('conversation-123');
@@ -193,14 +193,14 @@ describe('Woodwire Worker', () => {
     expect(await response.json()).toEqual({
       error: 'Message payload is too large',
     });
-    expect(fetch).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   test('accepts a message payload just under the 256 KB SQS limit', async () => {
-    const fetch = vi.fn().mockResolvedValue(new Response('<SendMessageResponse />', { status: 200 }));
+    const mockFetch = vi.fn().mockResolvedValue(new Response('<SendMessageResponse />', { status: 200 }));
     const worker = createWorker({
       createAwsClient: () => ({
-        fetch,
+        fetch: mockFetch,
       }),
     });
     vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('conversation-123');
@@ -236,7 +236,56 @@ describe('Woodwire Worker', () => {
       conversationId: 'conversation-123',
       status: 'pending',
     });
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('returns internal server error when AWS credentials are missing', async () => {
+    const worker = createWorker();
+    const envWithoutCredentials = {
+      ...baseEnv,
+    };
+    delete envWithoutCredentials.AWS_ACCESS_KEY_ID;
+    delete envWithoutCredentials.AWS_SECRET_ACCESS_KEY;
+
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/message', {
+        body: JSON.stringify({ attachments: [], text: 'Hello' }),
+        headers: {
+          'content-type': 'application/json',
+          'X-Woodwire-Auth': envWithoutCredentials.WOODWIRE_AUTH,
+        },
+        method: 'POST',
+      }),
+      envWithoutCredentials,
+      {},
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'Internal Server Error' });
+  });
+
+  test('returns internal server error when only one AWS credential is configured', async () => {
+    const worker = createWorker();
+    const envMissingSecret = {
+      ...baseEnv,
+    };
+    delete envMissingSecret.AWS_SECRET_ACCESS_KEY;
+
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/message', {
+        body: JSON.stringify({ attachments: [], text: 'Hello' }),
+        headers: {
+          'content-type': 'application/json',
+          'X-Woodwire-Auth': envMissingSecret.WOODWIRE_AUTH,
+        },
+        method: 'POST',
+      }),
+      envMissingSecret,
+      {},
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'Internal Server Error' });
   });
 
   test('rate limits repeated authenticated requests from the same IP', async () => {

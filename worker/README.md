@@ -247,7 +247,7 @@ expire in 15 minutes.
 
 ```bash
 cd worker
-npx --yes vitest run index.test.js
+npx --yes vitest run ./index.test.js
 npx wrangler deploy --dry-run
 ```
 

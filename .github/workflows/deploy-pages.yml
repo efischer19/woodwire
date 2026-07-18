@@ -30,9 +30,9 @@ jobs:
       #   with:
       #     node-version: 20
       # - name: Install dependencies
-      #   run: npm ci
+      #   run: <package-manager> install
       # - name: Build site
-      #   run: npm run build
+      #   run: <package-manager> run build
       # Then update upload-pages-artifact.path to your build output (e.g., dist/).
 
       - name: Configure GitHub Pages

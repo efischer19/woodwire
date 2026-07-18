@@ -119,8 +119,7 @@ uv sync
 python -m unittest discover -s tests -v
 
 # Worker tests
-cd worker
-npm test
+npx --yes vitest run worker/index.test.js
 ```
 
 ### Development Philosophy

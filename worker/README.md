@@ -3,6 +3,8 @@
 This Worker is Woodwire's zero-trust edge gateway. It authenticates requests
 with `X-Woodwire-Auth`, forwards inbound messages to SQS, polls S3 for outbox
 status, and defines the API contract that the PWA and bot integrate against.
+AWS requests are signed with the vendored `aws4fetch.js` module so deployment
+does not require npm dependencies.
 
 ## Deployment Configuration
 
@@ -245,7 +247,7 @@ expire in 15 minutes.
 
 ```bash
 cd worker
-npm test
+npx --yes vitest run ./index.test.js
 npx wrangler deploy --dry-run
 ```
 

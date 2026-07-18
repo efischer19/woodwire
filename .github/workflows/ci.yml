@@ -193,12 +193,8 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
-        run: npm ci
-        working-directory: worker
-
       - name: Run tests
-        run: npm test
+        run: npx --yes vitest@^4.1.0 run
         working-directory: worker
 
   bot-tests:

@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 
 import { createWorker, MAX_SQS_MESSAGE_BYTES } from './index.js';
 
 const baseEnv = {
+  AWS_ACCESS_KEY_ID: 'test-access-key-id',
   AWS_REGION: 'us-east-1',
+  AWS_SECRET_ACCESS_KEY: 'test-secret-access-key',
   CHAT_BUCKET_NAME: 'woodwire-chat',
   CHAT_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123456789012/woodwire-chat',
   PWA_ORIGIN: 'https://app.example.com',
@@ -40,11 +41,7 @@ describe('Woodwire Worker', () => {
   });
 
   test('rejects unauthenticated message requests', async () => {
-    const worker = createWorker({
-      createSqsClient: () => ({
-        send: vi.fn(),
-      }),
-    });
+    const worker = createWorker();
     const response = await worker.fetch(
       new Request('https://worker.example.com/api/message', {
         body: JSON.stringify({ attachments: [], text: 'Hello' }),
@@ -60,10 +57,10 @@ describe('Woodwire Worker', () => {
   });
 
   test('enqueues a message when the request is authenticated', async () => {
-    const send = vi.fn().mockResolvedValue({ MessageId: 'message-1' });
+    const mockFetch = vi.fn().mockResolvedValue(new Response('<SendMessageResponse />', { status: 200 }));
     const worker = createWorker({
-      createSqsClient: () => ({
-        send,
+      createAwsClient: () => ({
+        fetch: mockFetch,
       }),
     });
     vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('conversation-123');
@@ -88,8 +85,16 @@ describe('Woodwire Worker', () => {
       conversationId: 'conversation-123',
       status: 'pending',
     });
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(send.mock.calls[0][0].input.MessageBody)).toMatchObject({
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0][0]).toBe(baseEnv.CHAT_QUEUE_URL);
+    expect(mockFetch.mock.calls[0][1].method).toBe('POST');
+    expect(mockFetch.mock.calls[0][1].headers).toEqual({
+      'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
+    });
+    const sentBody = new URLSearchParams(mockFetch.mock.calls[0][1].body);
+    expect(sentBody.get('Action')).toBe('SendMessage');
+    expect(sentBody.get('Version')).toBe('2012-11-05');
+    expect(JSON.parse(sentBody.get('MessageBody'))).toMatchObject({
       schemaVersion: 1,
       attachments: ['attachments/a.txt'],
       conversationId: 'conversation-123',
@@ -98,10 +103,10 @@ describe('Woodwire Worker', () => {
   });
 
   test('preserves schema version 2 for encrypted message payloads', async () => {
-    const send = vi.fn().mockResolvedValue({ MessageId: 'message-1' });
+    const mockFetch = vi.fn().mockResolvedValue(new Response('<SendMessageResponse />', { status: 200 }));
     const worker = createWorker({
-      createSqsClient: () => ({
-        send,
+      createAwsClient: () => ({
+        fetch: mockFetch,
       }),
     });
     vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('conversation-123');
@@ -120,7 +125,8 @@ describe('Woodwire Worker', () => {
     );
 
     expect(response.status).toBe(202);
-    expect(JSON.parse(send.mock.calls[0][0].input.MessageBody)).toMatchObject({
+    const sentBody = new URLSearchParams(mockFetch.mock.calls[0][1].body);
+    expect(JSON.parse(sentBody.get('MessageBody'))).toMatchObject({
       schemaVersion: 2,
       text: 'encrypted-ciphertext',
     });
@@ -148,10 +154,10 @@ describe('Woodwire Worker', () => {
   });
 
   test('rejects a message payload that exceeds the 256 KB SQS limit', async () => {
-    const send = vi.fn().mockResolvedValue({ MessageId: 'message-1' });
+    const mockFetch = vi.fn().mockResolvedValue(new Response('<SendMessageResponse />', { status: 200 }));
     const worker = createWorker({
-      createSqsClient: () => ({
-        send,
+      createAwsClient: () => ({
+        fetch: mockFetch,
       }),
     });
     vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('conversation-123');
@@ -187,14 +193,14 @@ describe('Woodwire Worker', () => {
     expect(await response.json()).toEqual({
       error: 'Message payload is too large',
     });
-    expect(send).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   test('accepts a message payload just under the 256 KB SQS limit', async () => {
-    const send = vi.fn().mockResolvedValue({ MessageId: 'message-1' });
+    const mockFetch = vi.fn().mockResolvedValue(new Response('<SendMessageResponse />', { status: 200 }));
     const worker = createWorker({
-      createSqsClient: () => ({
-        send,
+      createAwsClient: () => ({
+        fetch: mockFetch,
       }),
     });
     vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('conversation-123');
@@ -230,13 +236,62 @@ describe('Woodwire Worker', () => {
       conversationId: 'conversation-123',
       status: 'pending',
     });
-    expect(send).toHaveBeenCalledTimes(1);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('returns internal server error when AWS credentials are missing', async () => {
+    const worker = createWorker();
+    const envWithoutCredentials = {
+      ...baseEnv,
+    };
+    delete envWithoutCredentials.AWS_ACCESS_KEY_ID;
+    delete envWithoutCredentials.AWS_SECRET_ACCESS_KEY;
+
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/message', {
+        body: JSON.stringify({ attachments: [], text: 'Hello' }),
+        headers: {
+          'content-type': 'application/json',
+          'X-Woodwire-Auth': envWithoutCredentials.WOODWIRE_AUTH,
+        },
+        method: 'POST',
+      }),
+      envWithoutCredentials,
+      {},
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'Internal Server Error' });
+  });
+
+  test('returns internal server error when only one AWS credential is configured', async () => {
+    const worker = createWorker();
+    const envMissingSecret = {
+      ...baseEnv,
+    };
+    delete envMissingSecret.AWS_SECRET_ACCESS_KEY;
+
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/message', {
+        body: JSON.stringify({ attachments: [], text: 'Hello' }),
+        headers: {
+          'content-type': 'application/json',
+          'X-Woodwire-Auth': envMissingSecret.WOODWIRE_AUTH,
+        },
+        method: 'POST',
+      }),
+      envMissingSecret,
+      {},
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'Internal Server Error' });
   });
 
   test('rate limits repeated authenticated requests from the same IP', async () => {
     const worker = createWorker({
-      createSqsClient: () => ({
-        send: vi.fn().mockResolvedValue({}),
+      createAwsClient: () => ({
+        fetch: vi.fn().mockResolvedValue(new Response('<SendMessageResponse />', { status: 200 })),
       }),
       now: vi
         .fn()
@@ -276,9 +331,12 @@ describe('Woodwire Worker', () => {
   });
 
   test('returns conversation status and uses the edge cache', async () => {
-    const s3Send = vi
-      .fn()
-      .mockResolvedValue({ Contents: [{ Key: 'outbox/conversation-123/response.md' }] });
+    const fetchS3List = vi.fn().mockResolvedValue(
+      new Response(
+        '<ListBucketResult><Contents><Key>outbox/conversation-123/response.md</Key></Contents></ListBucketResult>',
+        { status: 200 },
+      ),
+    );
     const cacheStore = new Map();
     const cache = {
       async match(request) {
@@ -292,9 +350,8 @@ describe('Woodwire Worker', () => {
     const waitUntilPromises = [];
     const worker = createWorker({
       cache,
-      createS3Client: () => ({
-        send: s3Send,
-      }),
+      createAwsClient: () => ({}),
+      fetchS3List,
     });
     const request = new Request('https://worker.example.com/api/status/conversation-123', {
       headers: {
@@ -329,16 +386,18 @@ describe('Woodwire Worker', () => {
       hasTranscript: true,
       status: 'complete',
     });
-    expect(s3Send).toHaveBeenCalledTimes(1);
+    expect(fetchS3List).toHaveBeenCalledTimes(1);
   });
 
   test('detects processing status from the marker object', async () => {
     const worker = createWorker({
-      createS3Client: () => ({
-        send: vi.fn().mockResolvedValue({
-          Contents: [{ Key: 'outbox/conversation-999/processing.json' }],
-        }),
-      }),
+      createAwsClient: () => ({}),
+      fetchS3List: vi.fn().mockResolvedValue(
+        new Response(
+          '<ListBucketResult><Contents><Key>outbox/conversation-999/processing.json</Key></Contents></ListBucketResult>',
+          { status: 200 },
+        ),
+      ),
     });
 
     const response = await worker.fetch(
@@ -361,13 +420,11 @@ describe('Woodwire Worker', () => {
   });
 
   test('generates a pre-signed upload URL with a scoped S3 key and content type', async () => {
-    const signS3Url = vi.fn().mockResolvedValue('https://uploads.example.com/presigned-put');
+    const signS3Request = vi.fn().mockResolvedValue({ url: 'https://uploads.example.com/presigned-put' });
     const worker = createWorker({
-      createS3Client: () => ({
-        send: vi.fn(),
-      }),
+      createAwsClient: () => ({}),
       now: () => 1_719_758_400_000,
-      signS3Url,
+      signS3Request,
     });
     vi.spyOn(globalThis.crypto, 'randomUUID')
       .mockReturnValueOnce('conversation-123')
@@ -395,20 +452,26 @@ describe('Woodwire Worker', () => {
       key: 'attachments/conversation-123/1719758400000-object-456.png',
       uploadUrl: 'https://uploads.example.com/presigned-put',
     });
-    expect(signS3Url).toHaveBeenCalledTimes(1);
-    expect(signS3Url.mock.calls[0][1]).toBeInstanceOf(PutObjectCommand);
-    expect(signS3Url.mock.calls[0][1].input).toEqual({
-      Bucket: baseEnv.CHAT_BUCKET_NAME,
-      ContentType: 'image/png',
-      Key: 'attachments/conversation-123/1719758400000-object-456.png',
+    expect(signS3Request).toHaveBeenCalledTimes(1);
+    expect(signS3Request.mock.calls[0][1]).toBe(
+      'https://woodwire-chat.s3.amazonaws.com/attachments/conversation-123/1719758400000-object-456.png',
+    );
+    expect(signS3Request.mock.calls[0][2]).toMatchObject({
+      method: 'PUT',
+      headers: { 'Content-Type': 'image/png' },
+      aws: {
+        expires: 300,
+        region: 'us-east-1',
+        service: 's3',
+        signQuery: true,
+      },
     });
-    expect(signS3Url.mock.calls[0][2]).toEqual({ expiresIn: 300 });
   });
 
   test('rejects oversized upload reservations before generating a URL', async () => {
-    const signS3Url = vi.fn();
+    const signS3Request = vi.fn();
     const worker = createWorker({
-      signS3Url,
+      signS3Request,
     });
 
     const response = await worker.fetch(
@@ -432,13 +495,13 @@ describe('Woodwire Worker', () => {
     expect(await response.json()).toEqual({
       error: 'Attachments must be 25 MB or smaller',
     });
-    expect(signS3Url).not.toHaveBeenCalled();
+    expect(signS3Request).not.toHaveBeenCalled();
   });
 
   test('rejects disallowed upload content types', async () => {
-    const signS3Url = vi.fn();
+    const signS3Request = vi.fn();
     const worker = createWorker({
-      signS3Url,
+      signS3Request,
     });
 
     const response = await worker.fetch(
@@ -461,16 +524,16 @@ describe('Woodwire Worker', () => {
     expect(await response.json()).toEqual({
       error: 'Field "contentType" is not allowed',
     });
-    expect(signS3Url).not.toHaveBeenCalled();
+    expect(signS3Request).not.toHaveBeenCalled();
   });
 
   test('returns a pre-signed download URL for an uploaded attachment', async () => {
-    const signS3Url = vi.fn().mockResolvedValue('https://downloads.example.com/presigned-attachment');
+    const signS3Request = vi.fn().mockResolvedValue({
+      url: 'https://downloads.example.com/presigned-attachment',
+    });
     const worker = createWorker({
-      createS3Client: () => ({
-        send: vi.fn(),
-      }),
-      signS3Url,
+      createAwsClient: () => ({}),
+      signS3Request,
     });
 
     const response = await worker.fetch(
@@ -492,19 +555,25 @@ describe('Woodwire Worker', () => {
       downloadUrl: 'https://downloads.example.com/presigned-attachment',
       key: 'attachments/conversation-123/1719758400000-object-456.png',
     });
-    expect(signS3Url).toHaveBeenCalledTimes(1);
-    expect(signS3Url.mock.calls[0][1]).toBeInstanceOf(GetObjectCommand);
-    expect(signS3Url.mock.calls[0][1].input).toEqual({
-      Bucket: baseEnv.CHAT_BUCKET_NAME,
-      Key: 'attachments/conversation-123/1719758400000-object-456.png',
+    expect(signS3Request).toHaveBeenCalledTimes(1);
+    expect(signS3Request.mock.calls[0][1]).toBe(
+      'https://woodwire-chat.s3.amazonaws.com/attachments/conversation-123/1719758400000-object-456.png',
+    );
+    expect(signS3Request.mock.calls[0][2]).toMatchObject({
+      method: 'GET',
+      aws: {
+        expires: 900,
+        region: 'us-east-1',
+        service: 's3',
+        signQuery: true,
+      },
     });
-    expect(signS3Url.mock.calls[0][2]).toEqual({ expiresIn: 900 });
   });
 
   test('rejects invalid attachment keys', async () => {
-    const signS3Url = vi.fn();
+    const signS3Request = vi.fn();
     const worker = createWorker({
-      signS3Url,
+      signS3Request,
     });
 
     const response = await worker.fetch(
@@ -522,27 +591,24 @@ describe('Woodwire Worker', () => {
     expect(await response.json()).toEqual({
       error: 'Invalid attachment key',
     });
-    expect(signS3Url).not.toHaveBeenCalled();
+    expect(signS3Request).not.toHaveBeenCalled();
   });
 
   test('returns pre-signed transcript and audio URLs for a completed response', async () => {
-    const signS3Url = vi
+    const signS3Request = vi
       .fn()
-      .mockResolvedValueOnce('https://downloads.example.com/presigned-audio')
-      .mockResolvedValueOnce('https://downloads.example.com/presigned-transcript');
-    const s3Send = vi
-      .fn()
-      .mockResolvedValue({
-        Contents: [
-          { Key: 'outbox/conversation-123/1719758400000-response.md' },
-          { Key: 'outbox/conversation-123/1719758400000-response.mp3' },
-        ],
-      });
+      .mockResolvedValueOnce({ url: 'https://downloads.example.com/presigned-audio' })
+      .mockResolvedValueOnce({ url: 'https://downloads.example.com/presigned-transcript' });
+    const fetchS3List = vi.fn().mockResolvedValue(
+      new Response(
+        '<ListBucketResult><Contents><Key>outbox/conversation-123/1719758400000-response.md</Key></Contents><Contents><Key>outbox/conversation-123/1719758400000-response.mp3</Key></Contents></ListBucketResult>',
+        { status: 200 },
+      ),
+    );
     const worker = createWorker({
-      createS3Client: () => ({
-        send: s3Send,
-      }),
-      signS3Url,
+      createAwsClient: () => ({}),
+      fetchS3List,
+      signS3Request,
     });
 
     const response = await worker.fetch(
@@ -561,31 +627,34 @@ describe('Woodwire Worker', () => {
       audioUrl: 'https://downloads.example.com/presigned-audio',
       transcriptUrl: 'https://downloads.example.com/presigned-transcript',
     });
-    expect(s3Send).toHaveBeenCalledTimes(1);
-    expect(signS3Url).toHaveBeenCalledTimes(2);
-    expect(signS3Url.mock.calls[0][1]).toBeInstanceOf(GetObjectCommand);
-    expect(signS3Url.mock.calls[0][1].input).toEqual({
-      Bucket: baseEnv.CHAT_BUCKET_NAME,
-      Key: 'outbox/conversation-123/1719758400000-response.mp3',
+    expect(fetchS3List).toHaveBeenCalledTimes(1);
+    expect(signS3Request).toHaveBeenCalledTimes(2);
+    expect(signS3Request.mock.calls[0][1]).toBe(
+      'https://woodwire-chat.s3.amazonaws.com/outbox/conversation-123/1719758400000-response.mp3',
+    );
+    expect(signS3Request.mock.calls[0][2]).toMatchObject({
+      method: 'GET',
+      aws: { expires: 900, region: 'us-east-1', service: 's3', signQuery: true },
     });
-    expect(signS3Url.mock.calls[0][2]).toEqual({ expiresIn: 900 });
-    expect(signS3Url.mock.calls[1][1]).toBeInstanceOf(GetObjectCommand);
-    expect(signS3Url.mock.calls[1][1].input).toEqual({
-      Bucket: baseEnv.CHAT_BUCKET_NAME,
-      Key: 'outbox/conversation-123/1719758400000-response.md',
-    });
+    expect(signS3Request.mock.calls[1][1]).toBe(
+      'https://woodwire-chat.s3.amazonaws.com/outbox/conversation-123/1719758400000-response.md',
+    );
   });
 
   test('returns only a pre-signed transcript URL when no audio response exists', async () => {
-    const signS3Url = vi.fn().mockResolvedValue('https://downloads.example.com/presigned-transcript');
-    const s3Send = vi.fn().mockResolvedValue({
-      Contents: [{ Key: 'outbox/conversation-555/1719758400000-response.md' }],
-    });
+    const signS3Request = vi
+      .fn()
+      .mockResolvedValue({ url: 'https://downloads.example.com/presigned-transcript' });
+    const fetchS3List = vi.fn().mockResolvedValue(
+      new Response(
+        '<ListBucketResult><Contents><Key>outbox/conversation-555/1719758400000-response.md</Key></Contents></ListBucketResult>',
+        { status: 200 },
+      ),
+    );
     const worker = createWorker({
-      createS3Client: () => ({
-        send: s3Send,
-      }),
-      signS3Url,
+      createAwsClient: () => ({}),
+      fetchS3List,
+      signS3Request,
     });
 
     const response = await worker.fetch(
@@ -607,15 +676,17 @@ describe('Woodwire Worker', () => {
   });
 
   test('returns only a pre-signed audio URL when no transcript exists', async () => {
-    const signS3Url = vi.fn().mockResolvedValue('https://downloads.example.com/presigned-audio');
-    const s3Send = vi.fn().mockResolvedValue({
-      Contents: [{ Key: 'outbox/conversation-777/1719758400000-response.mp3' }],
-    });
+    const signS3Request = vi.fn().mockResolvedValue({ url: 'https://downloads.example.com/presigned-audio' });
+    const fetchS3List = vi.fn().mockResolvedValue(
+      new Response(
+        '<ListBucketResult><Contents><Key>outbox/conversation-777/1719758400000-response.mp3</Key></Contents></ListBucketResult>',
+        { status: 200 },
+      ),
+    );
     const worker = createWorker({
-      createS3Client: () => ({
-        send: s3Send,
-      }),
-      signS3Url,
+      createAwsClient: () => ({}),
+      fetchS3List,
+      signS3Request,
     });
 
     const response = await worker.fetch(

@@ -119,7 +119,7 @@ vars = {
 
 ```bash
 # Test the Worker locally
-npm test
+npx --yes vitest run worker/index.test.js
 npx wrangler deploy --dry-run
 
 # Deploy to production

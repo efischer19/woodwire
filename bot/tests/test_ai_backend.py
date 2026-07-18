@@ -102,7 +102,8 @@ class AIBackendTests(unittest.TestCase):
         # Validate content structure
         self.assertIn("content", input_item)
         content = input_item["content"]
-        # Should have 1 text item + 2 file URL items (since files don't exist)
+        # Should have text + file URL items since the test uses non-existent file paths
+        # to verify the fallback behavior when files cannot be read
         self.assertEqual(len(content), 3)
         self.assertEqual(content[0]["type"], "input_text")
         self.assertEqual(content[0]["text"], "Hello")
@@ -370,10 +371,10 @@ class AIBackendTests(unittest.TestCase):
             }))
 
         backend = OpenClawBackend("http://127.0.0.1:8080/process")
-        non_existent_path = "/tmp/non_existent_file_xyz.txt"
+        nonexistent_file_path = "/tmp/nonexistent_file_path.txt"
         
         with patch("bot.ai_backend.urlopen", side_effect=fake_urlopen):
-            response = backend.process("Hello", [non_existent_path])
+            response = backend.process("Hello", [nonexistent_file_path])
 
         self.assertEqual(response, "Processed")
         request_body = json.loads(request_log[0].request.data.decode("utf-8"))
@@ -384,7 +385,7 @@ class AIBackendTests(unittest.TestCase):
         self.assertEqual(content[0]["type"], "input_text")
         self.assertEqual(content[1]["type"], "input_file")
         self.assertIn("file_url", content[1])
-        self.assertEqual(content[1]["file_url"], non_existent_path)
+        self.assertEqual(content[1]["file_url"], nonexistent_file_path)
 
 
 if __name__ == "__main__":

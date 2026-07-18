@@ -59,7 +59,7 @@ class OpenClawBackend:
             env.get("OPENCLAW_TIMEOUT_SECONDS", str(DEFAULT_OPENCLAW_TIMEOUT_SECONDS))
         )
         auth_token = env.get("AI_BACKEND_TOKEN")
-        model = (env.get("OPENCLAW_MODEL") or "").strip() or DEFAULT_OPENCLAW_MODEL
+        model = env.get("OPENCLAW_MODEL", DEFAULT_OPENCLAW_MODEL).strip() or DEFAULT_OPENCLAW_MODEL
         return cls(
             endpoint,
             fallback_backend=fallback_backend,

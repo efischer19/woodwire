@@ -4,3 +4,8 @@ compatibility_date = "2026-06-30"
 
 [observability.logs]
 enabled = true
+
+workers_dev = false
+routes = [
+  { pattern = "${CLOUDFLARE_ROUTE_PATTERN}", zone_name = "${CLOUDFLARE_ZONE_NAME}" }
+]

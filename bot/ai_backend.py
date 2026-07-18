@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -11,6 +12,7 @@ DEFAULT_OPENCLAW_HOST = "127.0.0.1"
 DEFAULT_OPENCLAW_PATH = "/process"
 DEFAULT_OPENCLAW_PORT = 8080
 DEFAULT_OPENCLAW_TIMEOUT_SECONDS = 60.0
+DEFAULT_OPENCLAW_MODEL = "openclaw/default"
 
 
 @runtime_checkable
@@ -24,6 +26,16 @@ class MockBackend:
 
 
 class OpenClawBackend:
+    @staticmethod
+    def _validate_model(model: str | None) -> str:
+        """Validate and normalize model string by stripping whitespace.
+
+        None, empty, or whitespace-only strings are replaced with DEFAULT_OPENCLAW_MODEL.
+        """
+        if not model:
+            return DEFAULT_OPENCLAW_MODEL
+        return model.strip() or DEFAULT_OPENCLAW_MODEL
+
     def __init__(
         self,
         endpoint: str,
@@ -32,6 +44,7 @@ class OpenClawBackend:
         logger: logging.Logger | None = None,
         timeout_seconds: float = DEFAULT_OPENCLAW_TIMEOUT_SECONDS,
         auth_token: str | None = None,
+        model: str = DEFAULT_OPENCLAW_MODEL,
     ) -> None:
         self.endpoint = endpoint
         self.fallback_backend = fallback_backend or MockBackend()
@@ -40,6 +53,7 @@ class OpenClawBackend:
         if auth_token and ("\n" in auth_token or "\r" in auth_token):
             raise ValueError("auth_token must not contain newline characters (\\n or \\r)")
         self.auth_token = auth_token
+        self.model = self._validate_model(model)
 
     @classmethod
     def from_env(
@@ -55,12 +69,14 @@ class OpenClawBackend:
             env.get("OPENCLAW_TIMEOUT_SECONDS", str(DEFAULT_OPENCLAW_TIMEOUT_SECONDS))
         )
         auth_token = env.get("AI_BACKEND_TOKEN")
+        model = cls._validate_model(env.get("OPENCLAW_MODEL"))
         return cls(
             endpoint,
             fallback_backend=fallback_backend,
             logger=logger,
             timeout_seconds=timeout_seconds,
             auth_token=auth_token,
+            model=model,
         )
 
     def process(self, message: str, attachments: list[str]) -> str:
@@ -71,9 +87,47 @@ class OpenClawBackend:
         if self.auth_token:
             headers["Authorization"] = f"Bearer {self.auth_token}"
 
+        # Build OpenResponses-compliant input structure
+        content: list[dict[str, Any]] = [
+            {"type": "input_text", "text": message}
+        ]
+
+        # Add file attachments to the content
+        for attachment_path in attachments:
+            attachment_path = attachment_path.strip()
+            if not attachment_path:
+                continue
+
+            # Try to read file content, otherwise use as URL
+            try:
+                with open(attachment_path, "rb") as f:
+                    file_data = base64.b64encode(f.read()).decode("utf-8")
+                    content.append({
+                        "type": "input_file",
+                        "filename": os.path.basename(attachment_path),
+                        "file_data": file_data,
+                    })
+            except OSError:
+                # If file can't be read, treat it as a URL
+                content.append({
+                    "type": "input_file",
+                    "file_url": attachment_path,
+                })
+
+        request_body = {
+            "model": self.model,
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": content,
+                }
+            ],
+        }
+
         request = Request(
             self.endpoint,
-            data=json.dumps({"attachments": attachments, "message": message}).encode("utf-8"),
+            data=json.dumps(request_body).encode("utf-8"),
             headers=headers,
             method="POST",
         )
@@ -133,7 +187,7 @@ def build_openclaw_endpoint(environ: dict[str, str]) -> str:
 
 
 def parse_openclaw_response(body: bytes, content_type: str) -> str:
-    """Accept raw text or common JSON text fields used by different OpenClaw setups."""
+    """Parse OpenResponses-compliant response and extract text content."""
     text = body.decode("utf-8").strip()
 
     if not text:
@@ -147,6 +201,30 @@ def parse_openclaw_response(body: bytes, content_type: str) -> str:
     if not isinstance(payload, dict):
         raise ValueError("OpenClaw JSON response must be an object")
 
+    # Handle OpenResponses schema: output is an array of items
+    if "output" in payload and isinstance(payload["output"], list):
+        for item in payload["output"]:
+            if not isinstance(item, dict):
+                continue
+
+            # Look for message items with assistant role
+            if item.get("type") == "message" and item.get("role") == "assistant":
+                content = item.get("content")
+
+                # Content can be a string or an array of content objects
+                if isinstance(content, str) and content.strip():
+                    return content
+
+                # If content is an array, look for output_text items
+                if isinstance(content, list):
+                    for content_item in content:
+                        if isinstance(content_item, dict):
+                            if content_item.get("type") == "output_text":
+                                text_value = content_item.get("text")
+                                if isinstance(text_value, str) and text_value.strip():
+                                    return text_value
+
+    # Fallback to common response field names for backward compatibility
     for key in ("response", "text", "content", "message"):
         value = payload.get(key)
 

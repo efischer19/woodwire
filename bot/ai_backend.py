@@ -26,6 +26,11 @@ class MockBackend:
 
 
 class OpenClawBackend:
+    @staticmethod
+    def _validate_model(model: str) -> str:
+        """Validate and normalize model string by stripping whitespace."""
+        return model.strip() or DEFAULT_OPENCLAW_MODEL
+
     def __init__(
         self,
         endpoint: str,
@@ -43,7 +48,7 @@ class OpenClawBackend:
         if auth_token and ("\n" in auth_token or "\r" in auth_token):
             raise ValueError("auth_token must not contain newline characters (\\n or \\r)")
         self.auth_token = auth_token
-        self.model = model.strip() or DEFAULT_OPENCLAW_MODEL
+        self.model = self._validate_model(model)
 
     @classmethod
     def from_env(
@@ -59,7 +64,7 @@ class OpenClawBackend:
             env.get("OPENCLAW_TIMEOUT_SECONDS", str(DEFAULT_OPENCLAW_TIMEOUT_SECONDS))
         )
         auth_token = env.get("AI_BACKEND_TOKEN")
-        model = env.get("OPENCLAW_MODEL", DEFAULT_OPENCLAW_MODEL).strip() or DEFAULT_OPENCLAW_MODEL
+        model = cls._validate_model(env.get("OPENCLAW_MODEL", DEFAULT_OPENCLAW_MODEL))
         return cls(
             endpoint,
             fallback_backend=fallback_backend,

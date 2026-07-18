@@ -25,6 +25,11 @@ class OpenClawResponse:
 
 
 class AIBackendTests(unittest.TestCase):
+    @staticmethod
+    def _build_auth_header(token: str) -> str:
+        """Build an Authorization header value with ****** format."""
+        return "Bearer " + token
+
     def test_mock_backend_echoes_message(self) -> None:
         backend = MockBackend()
 
@@ -89,6 +94,83 @@ class AIBackendTests(unittest.TestCase):
 
         self.assertEqual(response, "Echo: Hello")
         logger.error.assert_called_once()
+
+    def test_openclaw_backend_includes_bearer_token_when_auth_token_present(self) -> None:
+        request_log: list[SimpleNamespace] = []
+
+        def fake_urlopen(request, timeout):
+            request_log.append(SimpleNamespace(request=request, timeout=timeout))
+            return OpenClawResponse(json.dumps({"response": "Processed"}))
+
+        backend = OpenClawBackend(
+            "http://127.0.0.1:8080/process",
+            auth_token="secret-token-xyz",
+            timeout_seconds=12,
+        )
+
+        with patch("bot.ai_backend.urlopen", side_effect=fake_urlopen):
+            response = backend.process("Hello", [])
+
+        self.assertEqual(response, "Processed")
+        self.assertEqual(len(request_log), 1)
+        request = request_log[0].request
+        auth_header = request.headers.get("Authorization")
+        self.assertIsNotNone(auth_header)
+        expected_auth = self._build_auth_header("secret-token-xyz")
+        self.assertEqual(auth_header, expected_auth)
+
+    def test_openclaw_backend_omits_authorization_header_when_no_token(self) -> None:
+        request_log: list[SimpleNamespace] = []
+
+        def fake_urlopen(request, timeout):
+            request_log.append(SimpleNamespace(request=request, timeout=timeout))
+            return OpenClawResponse(json.dumps({"response": "Processed"}))
+
+        backend = OpenClawBackend("http://127.0.0.1:8080/process", timeout_seconds=12)
+
+        with patch("bot.ai_backend.urlopen", side_effect=fake_urlopen):
+            response = backend.process("Hello", [])
+
+        self.assertEqual(response, "Processed")
+        self.assertEqual(len(request_log), 1)
+        request = request_log[0].request
+        self.assertIsNone(request.headers.get("Authorization"))
+
+    def test_build_ai_backend_includes_auth_token_from_env(self) -> None:
+        request_log: list[SimpleNamespace] = []
+
+        def fake_urlopen(request, timeout):
+            request_log.append(SimpleNamespace(request=request, timeout=timeout))
+            return OpenClawResponse(json.dumps({"response": "Processed"}))
+
+        backend = build_ai_backend({"AI_BACKEND_TOKEN": "test-token-123"})
+
+        self.assertIsInstance(backend, OpenClawBackend)
+        self.assertEqual(backend.auth_token, "test-token-123")
+
+        with patch("bot.ai_backend.urlopen", side_effect=fake_urlopen):
+            backend.process("Test", [])
+
+        self.assertEqual(len(request_log), 1)
+        request = request_log[0].request
+        auth_header = request.headers.get("Authorization")
+        self.assertIsNotNone(auth_header)
+        expected_auth = self._build_auth_header("test-token-123")
+        self.assertEqual(auth_header, expected_auth)
+
+    def test_openclaw_backend_rejects_auth_token_with_newline(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must not contain newline characters"):
+            OpenClawBackend(
+                "http://127.0.0.1:8080/process",
+                auth_token="token\ninjection",
+            )
+
+    def test_openclaw_backend_rejects_auth_token_with_carriage_return(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must not contain newline characters"):
+            OpenClawBackend(
+                "http://127.0.0.1:8080/process",
+                auth_token="token\rinjection",
+            )
 
 
 if __name__ == "__main__":

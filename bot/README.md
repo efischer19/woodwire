@@ -35,6 +35,7 @@ The bot loads configuration from environment variables or a repository-local `.e
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `AI_BACKEND` | `openclaw` | LLM backend: `openclaw`, `ollama`, or `mock` |
+| `AI_BACKEND_TOKEN` | — | Auth token for backend API requests (optional; if present, sent as bearer token in `Authorization` header) |
 | `OPENCLAW_URL` | — | Override the full OpenClaw inference URL (e.g., `http://10.0.0.5:8080/process`) |
 | `OPENCLAW_HOST` | `127.0.0.1` | OpenClaw server hostname (used if `OPENCLAW_URL` not set) |
 | `OPENCLAW_PORT` | `8080` | OpenClaw server port |

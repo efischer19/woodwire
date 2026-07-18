@@ -327,13 +327,13 @@ class AIBackendTests(unittest.TestCase):
             temp_file = f.name
 
             backend = OpenClawBackend("http://127.0.0.1:8080/process")
-            
+
             with patch("bot.ai_backend.urlopen", side_effect=fake_urlopen):
                 response = backend.process("Hello", [temp_file])
 
             self.assertEqual(response, "Processed")
             request_body = json.loads(request_log[0].request.data.decode("utf-8"))
-            
+
             # Verify the file was included as file_data (base64-encoded)
             content = request_body["input"][0]["content"]
             # Should have text + file attachment

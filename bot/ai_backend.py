@@ -27,11 +27,13 @@ class MockBackend:
 
 class OpenClawBackend:
     @staticmethod
-    def _validate_model(model: str) -> str:
+    def _validate_model(model: str | None) -> str:
         """Validate and normalize model string by stripping whitespace.
         
-        Empty or whitespace-only strings are replaced with DEFAULT_OPENCLAW_MODEL.
+        None, empty, or whitespace-only strings are replaced with DEFAULT_OPENCLAW_MODEL.
         """
+        if not model:
+            return DEFAULT_OPENCLAW_MODEL
         return model.strip() or DEFAULT_OPENCLAW_MODEL
 
     def __init__(
@@ -67,7 +69,7 @@ class OpenClawBackend:
             env.get("OPENCLAW_TIMEOUT_SECONDS", str(DEFAULT_OPENCLAW_TIMEOUT_SECONDS))
         )
         auth_token = env.get("AI_BACKEND_TOKEN")
-        model = cls._validate_model(env.get("OPENCLAW_MODEL", DEFAULT_OPENCLAW_MODEL))
+        model = cls._validate_model(env.get("OPENCLAW_MODEL"))
         return cls(
             endpoint,
             fallback_backend=fallback_backend,

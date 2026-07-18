@@ -111,7 +111,8 @@ class AIBackendTests(unittest.TestCase):
         request = request_log[0].request
         auth_header = request.headers.get("Authorization")
         self.assertIsNotNone(auth_header)
-        self.assertTrue(auth_header.startswith("Bearer "), f"Authorization header should start with 'Bearer ', got: {auth_header}")
+        expected_auth = "Bearer " + "secret-token-xyz"
+        self.assertEqual(auth_header, expected_auth)
 
     def test_openclaw_backend_omits_authorization_header_when_no_token(self) -> None:
         request_log: list[SimpleNamespace] = []
@@ -135,6 +136,20 @@ class AIBackendTests(unittest.TestCase):
 
         self.assertIsInstance(backend, OpenClawBackend)
         self.assertEqual(backend.auth_token, "test-token-123")
+
+    def test_openclaw_backend_rejects_auth_token_with_newline(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must not contain newlines"):
+            OpenClawBackend(
+                "http://127.0.0.1:8080/process",
+                auth_token="token\ninjection",
+            )
+
+    def test_openclaw_backend_rejects_auth_token_with_carriage_return(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must not contain newlines"):
+            OpenClawBackend(
+                "http://127.0.0.1:8080/process",
+                auth_token="token\rinjection",
+            )
 
 
 if __name__ == "__main__":

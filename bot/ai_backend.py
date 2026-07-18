@@ -31,11 +31,13 @@ class OpenClawBackend:
         fallback_backend: AIBackend | None = None,
         logger: logging.Logger | None = None,
         timeout_seconds: float = DEFAULT_OPENCLAW_TIMEOUT_SECONDS,
+        auth_token: str | None = None,
     ) -> None:
         self.endpoint = endpoint
         self.fallback_backend = fallback_backend or MockBackend()
         self.logger = logger or logging.getLogger("woodwire.bot")
         self.timeout_seconds = timeout_seconds
+        self.auth_token = auth_token
 
     @classmethod
     def from_env(
@@ -50,21 +52,27 @@ class OpenClawBackend:
         timeout_seconds = float(
             env.get("OPENCLAW_TIMEOUT_SECONDS", str(DEFAULT_OPENCLAW_TIMEOUT_SECONDS))
         )
+        auth_token = env.get("AI_BACKEND_TOKEN")
         return cls(
             endpoint,
             fallback_backend=fallback_backend,
             logger=logger,
             timeout_seconds=timeout_seconds,
+            auth_token=auth_token,
         )
 
     def process(self, message: str, attachments: list[str]) -> str:
+        headers = {
+            "Accept": "application/json, text/plain",
+            "Content-Type": "application/json",
+        }
+        if self.auth_token:
+            headers["Authorization"] = f"Bearer {self.auth_token}"
+
         request = Request(
             self.endpoint,
             data=json.dumps({"attachments": attachments, "message": message}).encode("utf-8"),
-            headers={
-                "Accept": "application/json, text/plain",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
             method="POST",
         )
 

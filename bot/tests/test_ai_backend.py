@@ -90,6 +90,52 @@ class AIBackendTests(unittest.TestCase):
         self.assertEqual(response, "Echo: Hello")
         logger.error.assert_called_once()
 
+    def test_openclaw_backend_includes_bearer_token_when_auth_token_present(self) -> None:
+        request_log: list[SimpleNamespace] = []
+
+        def fake_urlopen(request, timeout):
+            request_log.append(SimpleNamespace(request=request, timeout=timeout))
+            return OpenClawResponse(json.dumps({"response": "Processed"}))
+
+        backend = OpenClawBackend(
+            "http://127.0.0.1:8080/process",
+            auth_token="secret-token-xyz",
+            timeout_seconds=12,
+        )
+
+        with patch("bot.ai_backend.urlopen", side_effect=fake_urlopen):
+            response = backend.process("Hello", [])
+
+        self.assertEqual(response, "Processed")
+        self.assertEqual(len(request_log), 1)
+        request = request_log[0].request
+        auth_header = request.headers.get("Authorization")
+        self.assertIsNotNone(auth_header)
+        self.assertTrue(auth_header.startswith("Bearer "), f"Authorization header should start with 'Bearer ', got: {auth_header}")
+
+    def test_openclaw_backend_omits_authorization_header_when_no_token(self) -> None:
+        request_log: list[SimpleNamespace] = []
+
+        def fake_urlopen(request, timeout):
+            request_log.append(SimpleNamespace(request=request, timeout=timeout))
+            return OpenClawResponse(json.dumps({"response": "Processed"}))
+
+        backend = OpenClawBackend("http://127.0.0.1:8080/process", timeout_seconds=12)
+
+        with patch("bot.ai_backend.urlopen", side_effect=fake_urlopen):
+            response = backend.process("Hello", [])
+
+        self.assertEqual(response, "Processed")
+        self.assertEqual(len(request_log), 1)
+        request = request_log[0].request
+        self.assertIsNone(request.headers.get("Authorization"))
+
+    def test_build_ai_backend_includes_auth_token_from_env(self) -> None:
+        backend = build_ai_backend({"AI_BACKEND_TOKEN": "test-token-123"})
+
+        self.assertIsInstance(backend, OpenClawBackend)
+        self.assertEqual(backend.auth_token, "test-token-123")
+
 
 if __name__ == "__main__":
     unittest.main()

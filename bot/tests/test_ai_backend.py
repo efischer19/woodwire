@@ -297,6 +297,97 @@ class AIBackendTests(unittest.TestCase):
         result = parse_openclaw_response(response_body, "text/plain")
         self.assertEqual(result, "Just plain text")
 
+    def test_openclaw_backend_reads_local_files_as_base64(self) -> None:
+        """Test that local files are read and encoded as base64 file_data."""
+        import tempfile
+        from pathlib import Path
+        
+        request_log: list[SimpleNamespace] = []
+
+        def fake_urlopen(request, timeout):
+            request_log.append(SimpleNamespace(request=request, timeout=timeout))
+            return OpenClawResponse(json.dumps({
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "Processed"
+                            }
+                        ]
+                    }
+                ]
+            }))
+
+        # Create a temporary file with known content
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            backend = OpenClawBackend("http://127.0.0.1:8080/process")
+            
+            with patch("bot.ai_backend.urlopen", side_effect=fake_urlopen):
+                response = backend.process("Hello", [temp_file])
+
+            self.assertEqual(response, "Processed")
+            request_body = json.loads(request_log[0].request.data.decode("utf-8"))
+            
+            # Verify the file was included as file_data (base64-encoded)
+            content = request_body["input"][0]["content"]
+            # Should have text + file attachment
+            self.assertEqual(len(content), 2)
+            self.assertEqual(content[0]["type"], "input_text")
+            self.assertEqual(content[0]["text"], "Hello")
+            self.assertEqual(content[1]["type"], "input_file")
+            self.assertIn("file_data", content[1])
+            self.assertEqual(content[1]["filename"], Path(temp_file).name)
+            
+        finally:
+            # Clean up the temporary file
+            import os
+            os.unlink(temp_file)
+
+    def test_openclaw_backend_uses_file_url_for_non_existent_files(self) -> None:
+        """Test that non-existent files are treated as URLs."""
+        request_log: list[SimpleNamespace] = []
+
+        def fake_urlopen(request, timeout):
+            request_log.append(SimpleNamespace(request=request, timeout=timeout))
+            return OpenClawResponse(json.dumps({
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "Processed"
+                            }
+                        ]
+                    }
+                ]
+            }))
+
+        backend = OpenClawBackend("http://127.0.0.1:8080/process")
+        non_existent_path = "/tmp/non_existent_file_xyz.txt"
+        
+        with patch("bot.ai_backend.urlopen", side_effect=fake_urlopen):
+            response = backend.process("Hello", [non_existent_path])
+
+        self.assertEqual(response, "Processed")
+        request_body = json.loads(request_log[0].request.data.decode("utf-8"))
+        
+        # Verify the file path was included as file_url
+        content = request_body["input"][0]["content"]
+        self.assertEqual(len(content), 2)
+        self.assertEqual(content[0]["type"], "input_text")
+        self.assertEqual(content[1]["type"], "input_file")
+        self.assertIn("file_url", content[1])
+        self.assertEqual(content[1]["file_url"], non_existent_path)
+
 
 if __name__ == "__main__":
     unittest.main()

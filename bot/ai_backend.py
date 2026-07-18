@@ -94,10 +94,10 @@ class OpenClawBackend:
                     file_data = base64.b64encode(f.read()).decode("utf-8")
                     content.append({
                         "type": "input_file",
-                        "filename": attachment_path.split("/")[-1],
+                        "filename": os.path.basename(attachment_path),
                         "file_data": file_data,
                     })
-            except (OSError, IOError):
+            except OSError:
                 # If file can't be read, treat it as a URL
                 content.append({
                     "type": "input_file",

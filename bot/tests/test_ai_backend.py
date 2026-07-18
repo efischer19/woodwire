@@ -25,6 +25,11 @@ class OpenClawResponse:
 
 
 class AIBackendTests(unittest.TestCase):
+    @staticmethod
+    def _build_auth_header(token: str) -> str:
+        """Build an Authorization header value with ****** format."""
+        return "Bearer " + token
+
     def test_mock_backend_echoes_message(self) -> None:
         backend = MockBackend()
 
@@ -111,7 +116,7 @@ class AIBackendTests(unittest.TestCase):
         request = request_log[0].request
         auth_header = request.headers.get("Authorization")
         self.assertIsNotNone(auth_header)
-        expected_auth = "Bearer " + "secret-token-xyz"
+        expected_auth = self._build_auth_header("secret-token-xyz")
         self.assertEqual(auth_header, expected_auth)
 
     def test_openclaw_backend_omits_authorization_header_when_no_token(self) -> None:
@@ -150,7 +155,7 @@ class AIBackendTests(unittest.TestCase):
         request = request_log[0].request
         auth_header = request.headers.get("Authorization")
         self.assertIsNotNone(auth_header)
-        expected_auth = "Bearer " + "test-token-123"
+        expected_auth = self._build_auth_header("test-token-123")
         self.assertEqual(auth_header, expected_auth)
 
     def test_openclaw_backend_rejects_auth_token_with_newline(self) -> None:

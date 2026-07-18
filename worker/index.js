@@ -86,6 +86,9 @@ export async function handleRequest(request, env, context = {}, dependencies = {
   }
 
   if (!url.pathname.startsWith('/api/')) {
+    if (request.method === 'GET') {
+      return fetch(request);
+    }
     return createResponse(request, env, 404, { error: 'Not Found' });
   }
 

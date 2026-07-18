@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -299,9 +301,6 @@ class AIBackendTests(unittest.TestCase):
 
     def test_openclaw_backend_reads_local_files_as_base64(self) -> None:
         """Test that local files are read and encoded as base64 file_data."""
-        import tempfile
-        from pathlib import Path
-        
         request_log: list[SimpleNamespace] = []
 
         def fake_urlopen(request, timeout):
@@ -343,11 +342,10 @@ class AIBackendTests(unittest.TestCase):
             self.assertEqual(content[0]["text"], "Hello")
             self.assertEqual(content[1]["type"], "input_file")
             self.assertIn("file_data", content[1])
-            self.assertEqual(content[1]["filename"], Path(temp_file).name)
+            self.assertEqual(content[1]["filename"], os.path.basename(temp_file))
             
         finally:
             # Clean up the temporary file
-            import os
             os.unlink(temp_file)
 
     def test_openclaw_backend_uses_file_url_for_non_existent_files(self) -> None:

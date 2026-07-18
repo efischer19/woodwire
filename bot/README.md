@@ -40,7 +40,7 @@ The bot loads configuration from environment variables or a repository-local `.e
 | `OPENCLAW_HOST` | `127.0.0.1` | OpenClaw server hostname (used if `OPENCLAW_URL` not set) |
 | `OPENCLAW_PORT` | `8080` | OpenClaw server port |
 | `OPENCLAW_PATH` | `/process` | OpenClaw inference endpoint path |
-| `OPENCLAW_MODEL` | `gpt-5` | OpenClaw model name sent in the OpenResponses request payload |
+| `OPENCLAW_MODEL` | `openclaw/default` | OpenClaw model name sent in the OpenResponses request payload |
 | `OLLAMA_URL` | `http://127.0.0.1:11434/api/generate` | Ollama inference URL |
 | `OLLAMA_MODEL` | `mistral` | Ollama model name |
 | `WOODWIRE_E2EE_KEY` | — | Base64-encoded 32-byte AES-256-GCM key for client-side encryption (optional) |

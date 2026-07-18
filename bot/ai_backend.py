@@ -28,7 +28,10 @@ class MockBackend:
 class OpenClawBackend:
     @staticmethod
     def _validate_model(model: str) -> str:
-        """Validate and normalize model string by stripping whitespace."""
+        """Validate and normalize model string by stripping whitespace.
+        
+        Empty or whitespace-only strings are replaced with DEFAULT_OPENCLAW_MODEL.
+        """
         return model.strip() or DEFAULT_OPENCLAW_MODEL
 
     def __init__(

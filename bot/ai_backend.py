@@ -38,7 +38,7 @@ class OpenClawBackend:
         self.logger = logger or logging.getLogger("woodwire.bot")
         self.timeout_seconds = timeout_seconds
         if auth_token and ("\n" in auth_token or "\r" in auth_token):
-            raise ValueError("auth_token must not contain newlines or carriage returns")
+            raise ValueError("auth_token must not contain newline characters (\\n or \\r)")
         self.auth_token = auth_token
 
     @classmethod

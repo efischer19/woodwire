@@ -154,14 +154,14 @@ class AIBackendTests(unittest.TestCase):
         self.assertEqual(auth_header, expected_auth)
 
     def test_openclaw_backend_rejects_auth_token_with_newline(self) -> None:
-        with self.assertRaisesRegex(ValueError, "must not contain newlines"):
+        with self.assertRaisesRegex(ValueError, "must not contain newline characters"):
             OpenClawBackend(
                 "http://127.0.0.1:8080/process",
                 auth_token="token\ninjection",
             )
 
     def test_openclaw_backend_rejects_auth_token_with_carriage_return(self) -> None:
-        with self.assertRaisesRegex(ValueError, "must not contain newlines"):
+        with self.assertRaisesRegex(ValueError, "must not contain newline characters"):
             OpenClawBackend(
                 "http://127.0.0.1:8080/process",
                 auth_token="token\rinjection",

@@ -4,7 +4,7 @@ import base64
 import json
 import logging
 import os
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -78,7 +78,7 @@ class OpenClawBackend:
             headers["Authorization"] = f"Bearer {self.auth_token}"
 
         # Build OpenResponses-compliant input structure
-        content: list[dict[str, str]] = [
+        content: list[dict[str, Any]] = [
             {"type": "input_text", "text": message}
         ]
         

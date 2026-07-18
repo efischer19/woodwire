@@ -102,8 +102,7 @@ class AIBackendTests(unittest.TestCase):
         # Validate content structure
         self.assertIn("content", input_item)
         content = input_item["content"]
-        # Should have text + file URL items since the test uses non-existent file paths
-        # to verify the fallback behavior when files cannot be read
+        # Should have text + 2 file URLs (non-existent paths trigger fallback)
         self.assertEqual(len(content), 3)
         self.assertEqual(content[0]["type"], "input_text")
         self.assertEqual(content[0]["text"], "Hello")

@@ -111,7 +111,7 @@ class AIBackendTests(unittest.TestCase):
         request = request_log[0].request
         auth_header = request.headers.get("Authorization")
         self.assertIsNotNone(auth_header)
-        expected_auth = f"Bearer " + "secret-token-xyz"
+        expected_auth = "Bearer " + "secret-token-xyz"
         self.assertEqual(auth_header, expected_auth)
 
     def test_openclaw_backend_omits_authorization_header_when_no_token(self) -> None:
@@ -150,7 +150,7 @@ class AIBackendTests(unittest.TestCase):
         request = request_log[0].request
         auth_header = request.headers.get("Authorization")
         self.assertIsNotNone(auth_header)
-        expected_auth = f"Bearer " + "test-token-123"
+        expected_auth = "Bearer " + "test-token-123"
         self.assertEqual(auth_header, expected_auth)
 
     def test_openclaw_backend_rejects_auth_token_with_newline(self) -> None:

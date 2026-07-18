@@ -29,7 +29,7 @@ class OpenClawBackend:
     @staticmethod
     def _validate_model(model: str | None) -> str:
         """Validate and normalize model string by stripping whitespace.
-        
+
         None, empty, or whitespace-only strings are replaced with DEFAULT_OPENCLAW_MODEL.
         """
         if not model:
@@ -91,13 +91,13 @@ class OpenClawBackend:
         content: list[dict[str, Any]] = [
             {"type": "input_text", "text": message}
         ]
-        
+
         # Add file attachments to the content
         for attachment_path in attachments:
             attachment_path = attachment_path.strip()
             if not attachment_path:
                 continue
-            
+
             # Try to read file content, otherwise use as URL
             try:
                 with open(attachment_path, "rb") as f:
@@ -206,15 +206,15 @@ def parse_openclaw_response(body: bytes, content_type: str) -> str:
         for item in payload["output"]:
             if not isinstance(item, dict):
                 continue
-            
+
             # Look for message items with assistant role
             if item.get("type") == "message" and item.get("role") == "assistant":
                 content = item.get("content")
-                
+
                 # Content can be a string or an array of content objects
                 if isinstance(content, str) and content.strip():
                     return content
-                
+
                 # If content is an array, look for output_text items
                 if isinstance(content, list):
                     for content_item in content:

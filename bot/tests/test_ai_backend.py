@@ -88,17 +88,17 @@ class AIBackendTests(unittest.TestCase):
         self.assertEqual(request.full_url, "http://127.0.0.1:8080/process")
         self.assertEqual(request.get_method(), "POST")
         self.assertEqual(request_log[0].timeout, 12)
-        
+
         # Validate the request body matches OpenResponses schema
         request_body = json.loads(request.data.decode("utf-8"))
-        self.assertEqual(request_body["model"], "gpt-5")
+        self.assertEqual(request_body["model"], "openclaw/default")
         self.assertIn("input", request_body)
         self.assertEqual(len(request_body["input"]), 1)
-        
+
         input_item = request_body["input"][0]
         self.assertEqual(input_item["type"], "message")
         self.assertEqual(input_item["role"], "user")
-        
+
         # Validate content structure
         self.assertIn("content", input_item)
         content = input_item["content"]
@@ -244,7 +244,7 @@ class AIBackendTests(unittest.TestCase):
     def test_parse_openclaw_response_handles_openresponses_format(self) -> None:
         """Test parsing OpenResponses format with output array."""
         from bot.ai_backend import parse_openclaw_response
-        
+
         response_body = json.dumps({
             "output": [
                 {
@@ -259,14 +259,14 @@ class AIBackendTests(unittest.TestCase):
                 }
             ]
         }).encode("utf-8")
-        
+
         result = parse_openclaw_response(response_body, "application/json")
         self.assertEqual(result, "Hello from OpenResponses")
 
     def test_parse_openclaw_response_handles_openresponses_format_with_string_content(self) -> None:
         """Test parsing OpenResponses format with string content instead of array."""
         from bot.ai_backend import parse_openclaw_response
-        
+
         response_body = json.dumps({
             "output": [
                 {
@@ -276,25 +276,25 @@ class AIBackendTests(unittest.TestCase):
                 }
             ]
         }).encode("utf-8")
-        
+
         result = parse_openclaw_response(response_body, "application/json")
         self.assertEqual(result, "Hello from OpenResponses")
 
     def test_parse_openclaw_response_falls_back_to_legacy_format(self) -> None:
         """Test backward compatibility with legacy response format."""
         from bot.ai_backend import parse_openclaw_response
-        
+
         response_body = json.dumps({
             "response": "Legacy response format"
         }).encode("utf-8")
-        
+
         result = parse_openclaw_response(response_body, "application/json")
         self.assertEqual(result, "Legacy response format")
 
     def test_parse_openclaw_response_handles_plain_text(self) -> None:
         """Test parsing plain text response."""
         from bot.ai_backend import parse_openclaw_response
-        
+
         response_body = b"Just plain text"
         result = parse_openclaw_response(response_body, "text/plain")
         self.assertEqual(result, "Just plain text")
@@ -367,13 +367,13 @@ class AIBackendTests(unittest.TestCase):
 
         backend = OpenClawBackend("http://127.0.0.1:8080/process")
         nonexistent_path = os.path.join(tempfile.gettempdir(), "nonexistent_file.txt")
-        
+
         with patch("bot.ai_backend.urlopen", side_effect=fake_urlopen):
             response = backend.process("Hello", [nonexistent_path])
 
         self.assertEqual(response, "Processed")
         request_body = json.loads(request_log[0].request.data.decode("utf-8"))
-        
+
         # Verify the file path was included as file_url
         content = request_body["input"][0]["content"]
         self.assertEqual(len(content), 2)

@@ -726,4 +726,44 @@ describe('Woodwire Worker', () => {
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ error: 'Forbidden' });
   });
+
+  test('proxies GET requests for non-API paths to the origin', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(new Response('<!DOCTYPE html><html></html>', { status: 200 }));
+    vi.stubGlobal('fetch', mockFetch);
+
+    const worker = createWorker();
+    const request = new Request('https://worker.example.com/index.html');
+    const response = await worker.fetch(request, baseEnv, {});
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('<!DOCTYPE html><html></html>');
+    expect(mockFetch).toHaveBeenCalledWith(request);
+  });
+
+  test('returns 404 for non-GET requests to non-API paths', async () => {
+    const worker = createWorker();
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/some-resource', {
+        method: 'POST',
+      }),
+      baseEnv,
+      {},
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'Not Found' });
+  });
+
+  test('proxies GET requests for CSS and JS assets to the origin', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(new Response('body { margin: 0; }', { status: 200, headers: { 'Content-Type': 'text/css' } }));
+    vi.stubGlobal('fetch', mockFetch);
+
+    const worker = createWorker();
+    const request = new Request('https://worker.example.com/styles.css');
+    const response = await worker.fetch(request, baseEnv, {});
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('body { margin: 0; }');
+    expect(mockFetch).toHaveBeenCalledWith(request);
+  });
 });

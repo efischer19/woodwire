@@ -43,7 +43,7 @@ class OpenClawBackend:
         if auth_token and ("\n" in auth_token or "\r" in auth_token):
             raise ValueError("auth_token must not contain newline characters (\\n or \\r)")
         self.auth_token = auth_token
-        self.model = model
+        self.model = model.strip() or DEFAULT_OPENCLAW_MODEL
 
     @classmethod
     def from_env(

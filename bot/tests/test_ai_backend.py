@@ -370,10 +370,10 @@ class AIBackendTests(unittest.TestCase):
             }))
 
         backend = OpenClawBackend("http://127.0.0.1:8080/process")
-        nonexistent_file_path = "/tmp/nonexistent_file_path.txt"
+        nonexistent_path = "/tmp/nonexistent_file.txt"
         
         with patch("bot.ai_backend.urlopen", side_effect=fake_urlopen):
-            response = backend.process("Hello", [nonexistent_file_path])
+            response = backend.process("Hello", [nonexistent_path])
 
         self.assertEqual(response, "Processed")
         request_body = json.loads(request_log[0].request.data.decode("utf-8"))
@@ -384,7 +384,7 @@ class AIBackendTests(unittest.TestCase):
         self.assertEqual(content[0]["type"], "input_text")
         self.assertEqual(content[1]["type"], "input_file")
         self.assertIn("file_url", content[1])
-        self.assertEqual(content[1]["file_url"], nonexistent_file_path)
+        self.assertEqual(content[1]["file_url"], nonexistent_path)
 
 
 if __name__ == "__main__":

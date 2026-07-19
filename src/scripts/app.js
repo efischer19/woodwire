@@ -8,9 +8,11 @@
 "use strict";
 
 const STORAGE_KEYS = {
+  activeConversationId: "woodwire_active_conversation_id",
   apiBase: "woodwire_api_base",
   autoplay: "woodwire_autoplay",
   auth: "woodwire_auth",
+  conversations: "woodwire_conversations",
   e2eeKey: "woodwire_e2ee_key",
   history: "woodwire_history",
   pendingConversations: "woodwire_pending_conversations",
@@ -33,6 +35,7 @@ const VOICE_MEMO_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp
 const VOICE_RESPONSE_NO_TRANSCRIPT_TEXT = "Voice response — no transcript available";
 const E2EE_IV_LENGTH_BYTES = 12;
 const E2EE_KEY_LENGTH_BYTES = 32;
+const MAX_CONVERSATION_NAME_LENGTH = 80;
 // Encode in 32 KB slices to avoid exceeding Function.apply / spread call limits.
 const BASE64_ENCODING_CHUNK_BYTES = 0x8000;
 const DEFAULT_DECRYPTION_FAILURE_MESSAGE =
@@ -54,7 +57,9 @@ function initChatApp() {
   }
 
   const state = {
+    activeConversationId: getActiveConversationId(),
     composerAttachments: [],
+    conversations: getStoredConversations(),
     isDrainingQueue: false,
     pendingConversations: new Map(
       getPendingConversations().map((conversation) => [conversation.conversationId, conversation]),
@@ -66,9 +71,13 @@ function initChatApp() {
 
   hydrateSetupForm(elements);
   initializeVoiceMemo(elements, state);
+  hydrateConversationState(state);
   renderStoredMessages(elements);
   renderQueuedMessages(elements);
   renderPendingAttachments(elements, state);
+  renderConversationList(elements, state);
+  syncVisibleConversation(elements, state.activeConversationId);
+  updateConversationUi(elements, state);
   updateConnectivity(elements);
   updateQueueStatus(elements);
   updateConnectionUi(elements);
@@ -111,6 +120,46 @@ function initChatApp() {
 
   elements.connectionSettings.addEventListener("click", () => {
     toggleSetupPanel(elements, elements.setupPanel.classList.contains("is-hidden"));
+  });
+
+  elements.newConversationButton?.addEventListener("click", () => {
+    setActiveConversationId(state, null);
+    renderConversationList(elements, state);
+    syncVisibleConversation(elements, state.activeConversationId);
+    updateConversationUi(elements, state);
+    elements.messageInput.focus();
+  });
+
+  elements.conversationList?.addEventListener("click", (event) => {
+    const selectButton = event.target.closest("[data-select-conversation]");
+    if (selectButton) {
+      setActiveConversationId(state, selectButton.dataset.selectConversation || null);
+      renderConversationList(elements, state);
+      syncVisibleConversation(elements, state.activeConversationId);
+      updateConversationUi(elements, state);
+      elements.messageInput.focus();
+      return;
+    }
+
+    const renameButton = event.target.closest("[data-rename-conversation]");
+    if (!renameButton) {
+      return;
+    }
+
+    const conversationId = renameButton.dataset.renameConversation || "";
+    const conversation = state.conversations.get(conversationId);
+    if (!conversation) {
+      return;
+    }
+
+    const nextName = window.prompt("Rename conversation", conversation.displayName || "");
+    if (nextName === null) {
+      return;
+    }
+
+    renameConversation(state, conversationId, nextName);
+    renderConversationList(elements, state);
+    updateConversationUi(elements, state);
   });
 
   elements.autoplayVoice?.addEventListener("change", () => {
@@ -181,10 +230,11 @@ function initChatApp() {
       }
 
       const messageAttachments = consumeComposerAttachments(elements, state);
-      const localMessage = createLocalMessage(text, messageAttachments);
+      const localMessage = createLocalMessage(text, messageAttachments, state.activeConversationId);
       appendMessage(elements, {
         author: "You",
         attachments: messageAttachments,
+        conversationId: localMessage.conversationId,
         localId: localMessage.localId,
         status: navigator.onLine ? "Sending…" : "Queued for delivery",
         text: localMessage.text,
@@ -253,6 +303,8 @@ function getAppElements() {
     attachmentStatus: document.getElementById("attachment-status"),
     autoplayVoice: document.getElementById("autoplay-voice"),
     composer: document.getElementById("composer"),
+    conversationList: document.getElementById("conversation-list"),
+    conversationSubtitle: document.getElementById("conversation-subtitle"),
     connectionSettings: document.getElementById("connection-settings"),
     e2eeKey: document.getElementById("e2ee-key"),
     flashMessage: document.getElementById("flash-message"),
@@ -260,6 +312,7 @@ function getAppElements() {
     messageInput: document.getElementById("message-input"),
     offlineIndicator: document.getElementById("offline-indicator"),
     passphrase: document.getElementById("passphrase"),
+    newConversationButton: document.getElementById("new-conversation"),
     queueStatus: document.getElementById("queue-status"),
     screenReaderStatus: document.getElementById("screen-reader-status"),
     sendButton: document.getElementById("send-button"),
@@ -692,11 +745,12 @@ function announce(elements, message) {
   elements.screenReaderStatus.textContent = message;
 }
 
-function createLocalMessage(text, attachments = []) {
+function createLocalMessage(text, attachments = [], conversationId = null) {
   fallbackMessageCounter += 1;
 
   return {
     attachments: serializeStoredAttachments(attachments),
+    conversationId: conversationId || null,
     createdAt: new Date().toISOString(),
     localId:
       globalThis.crypto?.randomUUID?.() ||
@@ -711,6 +765,7 @@ async function sendMessage(message, elements, state) {
     const response = await workerFetch("/api/message", {
       body: JSON.stringify({
         attachments: message.attachments.map((attachment) => attachment.key),
+        conversationId: message.conversationId || undefined,
         schemaVersion: 2,
         text: encryptedText,
       }),
@@ -724,12 +779,26 @@ async function sendMessage(message, elements, state) {
     }
 
     const payload = await response.json();
+    assignConversationIdToMessage(message.localId, payload.conversationId, elements);
+    ensureConversationRecord(state, payload.conversationId, message.text);
+    const shouldActivateConversation =
+      !state.activeConversationId ||
+      state.activeConversationId === message.conversationId ||
+      state.activeConversationId === payload.conversationId;
+    if (shouldActivateConversation) {
+      setActiveConversationId(state, payload.conversationId);
+    }
     updateMessageStatus(elements, message.localId, "Sent · waiting for reply", false);
     trackPendingConversation(state, {
       conversationId: payload.conversationId,
       localId: message.localId,
       startedAt: Date.now(),
     });
+    renderConversationList(elements, state);
+    if (shouldActivateConversation) {
+      syncVisibleConversation(elements, state.activeConversationId);
+      updateConversationUi(elements, state);
+    }
     ensurePollingLoop(elements, state);
     announce(elements, "Message sent. Waiting for a reply.");
     return "sent";
@@ -1055,6 +1124,10 @@ function appendMessage(elements, message, options = {}) {
   const article = document.createElement("article");
   article.className = `message message-${message.variant}`;
 
+  if (message.conversationId) {
+    article.dataset.conversationId = message.conversationId;
+  }
+
   if (message.localId) {
     article.dataset.localId = message.localId;
   }
@@ -1096,6 +1169,7 @@ function appendMessage(elements, message, options = {}) {
 
   article.append(body, meta);
   elements.messageHistory.append(article);
+  applyConversationVisibility(article, getActiveConversationId());
   elements.messageHistory.scrollTop = elements.messageHistory.scrollHeight;
 
   if (options.persist !== false) {
@@ -1902,6 +1976,223 @@ function syncPendingConversations(state) {
     STORAGE_KEYS.pendingConversations,
     JSON.stringify(Array.from(state.pendingConversations.values())),
   );
+}
+
+function hydrateConversationState(state) {
+  let didChange = false;
+  const messages = getStoredMessages();
+
+  for (const message of messages) {
+    if (!message?.conversationId || state.conversations.has(message.conversationId)) {
+      continue;
+    }
+
+    state.conversations.set(message.conversationId, {
+      conversationId: message.conversationId,
+      displayName: buildConversationDisplayName(message.text, state.conversations.size + 1),
+    });
+    didChange = true;
+  }
+
+  for (const conversation of state.pendingConversations.values()) {
+    if (!conversation?.conversationId || state.conversations.has(conversation.conversationId)) {
+      continue;
+    }
+
+    state.conversations.set(conversation.conversationId, {
+      conversationId: conversation.conversationId,
+      displayName: buildConversationDisplayName("", state.conversations.size + 1),
+    });
+    didChange = true;
+  }
+
+  if (state.activeConversationId && !state.conversations.has(state.activeConversationId)) {
+    state.activeConversationId = null;
+    setStorageItem(STORAGE_KEYS.activeConversationId, "");
+  }
+
+  if (didChange) {
+    syncStoredConversations(state);
+  }
+}
+
+function ensureConversationRecord(state, conversationId, seedText = "") {
+  if (!conversationId) {
+    return null;
+  }
+
+  const existingConversation = state.conversations.get(conversationId);
+
+  if (existingConversation) {
+    return existingConversation;
+  }
+
+  const conversation = {
+    conversationId,
+    displayName: buildConversationDisplayName(seedText, state.conversations.size + 1),
+  };
+  state.conversations.set(conversationId, conversation);
+  syncStoredConversations(state);
+  return conversation;
+}
+
+function renameConversation(state, conversationId, nextName) {
+  const conversation = state.conversations.get(conversationId);
+  if (!conversation) {
+    return;
+  }
+
+  const trimmedName = String(nextName || "").trim();
+  conversation.displayName = buildConversationDisplayName(
+    trimmedName || conversation.displayName,
+    1,
+  );
+  state.conversations.set(conversationId, conversation);
+  syncStoredConversations(state);
+}
+
+function renderConversationList(elements, state) {
+  if (!elements.conversationList) {
+    return;
+  }
+
+  elements.conversationList.innerHTML = "";
+
+  if (!state.conversations.size) {
+    const emptyItem = document.createElement("li");
+    emptyItem.className = "conversation-empty";
+    emptyItem.textContent = "No saved conversations yet.";
+    elements.conversationList.append(emptyItem);
+    return;
+  }
+
+  for (const conversation of state.conversations.values()) {
+    const item = document.createElement("li");
+    item.className = "conversation-item";
+
+    const selectButton = document.createElement("button");
+    selectButton.className = "secondary-button conversation-select-button";
+    if (conversation.conversationId === state.activeConversationId) {
+      selectButton.classList.add("is-active");
+      selectButton.setAttribute("aria-current", "true");
+    }
+    selectButton.dataset.selectConversation = conversation.conversationId;
+    selectButton.type = "button";
+    selectButton.textContent = conversation.displayName;
+
+    const renameButton = document.createElement("button");
+    renameButton.className = "secondary-button conversation-rename-button";
+    renameButton.dataset.renameConversation = conversation.conversationId;
+    renameButton.type = "button";
+    renameButton.textContent = "Rename";
+
+    item.append(selectButton, renameButton);
+    elements.conversationList.append(item);
+  }
+}
+
+function updateConversationUi(elements, state) {
+  if (!elements.conversationSubtitle) {
+    return;
+  }
+
+  const activeConversation = state.activeConversationId
+    ? state.conversations.get(state.activeConversationId)
+    : null;
+
+  elements.conversationSubtitle.textContent = activeConversation
+    ? `Resuming ${activeConversation.displayName}. New messages will stay in this thread.`
+    : "Start a new conversation or resume a saved thread from this browser.";
+}
+
+function setActiveConversationId(state, conversationId) {
+  state.activeConversationId = conversationId || null;
+  setStorageItem(STORAGE_KEYS.activeConversationId, state.activeConversationId || "");
+}
+
+function buildConversationDisplayName(seedText, fallbackIndex) {
+  const trimmedText = String(seedText || "").trim().replace(/\s+/g, " ");
+
+  if (trimmedText) {
+    return trimmedText.slice(0, MAX_CONVERSATION_NAME_LENGTH);
+  }
+
+  return `Conversation ${fallbackIndex}`;
+}
+
+function applyConversationVisibility(messageElement, activeConversationId) {
+  if (!messageElement) {
+    return;
+  }
+
+  const messageConversationId = messageElement.dataset.conversationId || null;
+  const normalizedActiveConversationId = activeConversationId || null;
+  messageElement.hidden =
+    normalizedActiveConversationId === null
+      ? messageConversationId !== null
+      : messageConversationId !== normalizedActiveConversationId;
+}
+
+function syncVisibleConversation(elements, activeConversationId) {
+  for (const messageElement of elements.messageHistory.querySelectorAll(".message")) {
+    applyConversationVisibility(messageElement, activeConversationId);
+  }
+}
+
+function assignConversationIdToMessage(localId, conversationId, elements) {
+  if (!localId || !conversationId) {
+    return;
+  }
+
+  const messageElement = elements.messageHistory.querySelector(`[data-local-id="${localId}"]`);
+  if (messageElement) {
+    messageElement.dataset.conversationId = conversationId;
+  }
+
+  const messages = getStoredMessages().map((message) =>
+    message.role === "user" && message.id === localId
+      ? { ...message, conversationId }
+      : message,
+  );
+  setStoredMessages(messages);
+}
+
+function getStoredConversations() {
+  const storedConversations = getStorageJson(STORAGE_KEYS.conversations, {});
+  const conversations = new Map();
+
+  if (!storedConversations || typeof storedConversations !== "object" || Array.isArray(storedConversations)) {
+    return conversations;
+  }
+
+  for (const [conversationId, conversation] of Object.entries(storedConversations)) {
+    if (!conversationId) {
+      continue;
+    }
+
+    conversations.set(conversationId, {
+      conversationId,
+      displayName: buildConversationDisplayName(conversation?.displayName, conversations.size + 1),
+    });
+  }
+
+  return conversations;
+}
+
+function syncStoredConversations(state) {
+  const storedConversations = {};
+
+  for (const [conversationId, conversation] of state.conversations.entries()) {
+    storedConversations[conversationId] = {
+      displayName: buildConversationDisplayName(conversation.displayName, 1),
+    };
+  }
+
+  setStorageItem(STORAGE_KEYS.conversations, JSON.stringify(storedConversations));
+}
+
+function getActiveConversationId() {
+  return getStorageItem(STORAGE_KEYS.activeConversationId) || null;
 }
 
 function isDifferentStoredMessage(message, storedMessage) {

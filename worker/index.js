@@ -171,7 +171,10 @@ async function handleMessageRequest(request, env, dependencies) {
     return awsConfigError;
   }
 
-  const conversationId = crypto.randomUUID();
+  const conversationId =
+    typeof body.conversationId === 'string' && isValidConversationId(body.conversationId)
+      ? body.conversationId
+      : crypto.randomUUID();
   const schemaVersion = getMessageSchemaVersion(body.schemaVersion);
   const payload = {
     schemaVersion,
@@ -486,6 +489,10 @@ function validateMessagePayload(body) {
     (!Number.isInteger(body.schemaVersion) || body.schemaVersion < 1 || body.schemaVersion > 2)
   ) {
     return 'Field "schemaVersion" must be 1 or 2';
+  }
+
+  if (body.conversationId !== undefined && typeof body.conversationId !== 'string') {
+    return 'Field "conversationId" must be a string';
   }
 
   if (!body.attachments.every((attachment) => typeof attachment === 'string' && attachment.trim() !== '')) {

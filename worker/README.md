@@ -111,6 +111,7 @@ Queues a new chat request for the local bot.
 ```json
 {
   "text": "Hello from the PWA",
+  "conversationId": "9f4fd2aa-6f7d-4e3a-9564-c6470cbaad37",
   "attachments": [
     "attachments/conversation-123/voice-note.m4a"
   ]
@@ -118,6 +119,7 @@ Queues a new chat request for the local bot.
 ```
 
 - `text` must be a non-empty string
+- `conversationId` is optional; when present and it matches `^[A-Za-z0-9_-]{1,128}$`, the Worker reuses it to resume the thread
 - `attachments` must be an array of non-empty string keys
 - The serialized SQS message payload must not exceed 256 KB (262,144 bytes)
 

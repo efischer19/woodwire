@@ -17,11 +17,21 @@ DEFAULT_OPENCLAW_MODEL = "openclaw/default"
 
 @runtime_checkable
 class AIBackend(Protocol):
-    def process(self, message: str, attachments: list[str]) -> str: ...
+    def process(
+        self,
+        message: str,
+        attachments: list[str],
+        conversation_id: str | None = None,
+    ) -> str: ...
 
 
 class MockBackend:
-    def process(self, message: str, _attachments: list[str]) -> str:
+    def process(
+        self,
+        message: str,
+        _attachments: list[str],
+        _conversation_id: str | None = None,
+    ) -> str:
         return f"Echo: {message}"
 
 
@@ -79,13 +89,21 @@ class OpenClawBackend:
             model=model,
         )
 
-    def process(self, message: str, attachments: list[str]) -> str:
+    def process(
+        self,
+        message: str,
+        attachments: list[str],
+        conversation_id: str | None = None,
+    ) -> str:
         headers = {
             "Accept": "application/json, text/plain",
             "Content-Type": "application/json",
         }
         if self.auth_token:
             headers["Authorization"] = f"Bearer {self.auth_token}"
+
+        if conversation_id:
+            headers["X-OpenClaw-Session-Key"] = conversation_id
 
         # Build OpenResponses-compliant input structure
         content: list[dict[str, Any]] = [
@@ -124,6 +142,8 @@ class OpenClawBackend:
                 }
             ],
         }
+        if conversation_id:
+            request_body["conversation"] = conversation_id
 
         request = Request(
             self.endpoint,
@@ -144,7 +164,7 @@ class OpenClawBackend:
                 self.endpoint,
                 error,
             )
-            return self.fallback_backend.process(message, attachments)
+            return self.fallback_backend.process(message, attachments, conversation_id)
 
 
 def build_ai_backend(

@@ -292,8 +292,14 @@ main {
   width: 100%;
 }
 
+.chat-layout {
+  display: grid;
+  gap: var(--spacing-md);
+}
+
 .setup-card,
-.chat-card {
+.chat-card,
+.conversation-sidebar-card {
   background-color: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -343,6 +349,62 @@ main {
   display: grid;
   gap: 1px;
   overflow: hidden;
+}
+
+.conversation-sidebar-card {
+  display: grid;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+}
+
+.conversation-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+}
+
+.conversation-new-button {
+  min-height: auto;
+  padding: 0.5rem 0.75rem;
+}
+
+.conversation-list {
+  display: grid;
+  gap: var(--spacing-sm);
+  list-style: none;
+}
+
+.conversation-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--spacing-sm);
+  align-items: start;
+}
+
+.conversation-select-button,
+.conversation-rename-button {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.conversation-select-button.is-active {
+  border-color: var(--color-accent);
+  background-color: var(--color-user-message);
+}
+
+.conversation-rename-button {
+  min-height: auto;
+  padding: 0.5rem 0.75rem;
+}
+
+.conversation-empty {
+  padding: 0.875rem 1rem;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  background-color: var(--color-bg);
 }
 
 .chat-header,
@@ -652,9 +714,19 @@ footer p {
 
 @media (min-width: 48rem) {
   .setup-card,
-  .chat-card {
-    max-width: min(100%, 60rem);
+  .chat-layout {
+    max-width: min(100%, 72rem);
     margin: 0 auto;
+  }
+
+  .chat-layout {
+    grid-template-columns: minmax(16rem, 18rem) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .conversation-sidebar {
+    position: sticky;
+    top: var(--spacing-lg);
   }
 
   .composer-actions {

@@ -2126,7 +2126,11 @@ function applyConversationVisibility(messageElement, activeConversationId) {
   }
 
   const messageConversationId = messageElement.dataset.conversationId || null;
-  messageElement.hidden = messageConversationId !== (activeConversationId || null);
+  const normalizedActiveConversationId = activeConversationId || null;
+  messageElement.hidden =
+    normalizedActiveConversationId === null
+      ? messageConversationId !== null
+      : messageConversationId !== normalizedActiveConversationId;
 }
 
 function syncVisibleConversation(elements, activeConversationId) {
@@ -2188,8 +2192,7 @@ function syncStoredConversations(state) {
 }
 
 function getActiveConversationId() {
-  const conversationId = getStorageItem(STORAGE_KEYS.activeConversationId);
-  return conversationId ? conversationId : null;
+  return getStorageItem(STORAGE_KEYS.activeConversationId) || null;
 }
 
 function isDifferentStoredMessage(message, storedMessage) {

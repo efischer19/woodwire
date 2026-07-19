@@ -32,6 +32,16 @@ class AIBackendTests(unittest.TestCase):
         """Build an Authorization header value with ****** format."""
         return "Bearer " + token
 
+    @staticmethod
+    def _get_header_case_insensitive(request, name: str) -> str | None:
+        lookup_name = name.lower()
+
+        for header_name, header_value in request.headers.items():
+            if header_name.lower() == lookup_name:
+                return header_value
+
+        return None
+
     def test_mock_backend_echoes_message(self) -> None:
         backend = MockBackend()
 
@@ -88,7 +98,10 @@ class AIBackendTests(unittest.TestCase):
         self.assertEqual(request.full_url, "http://127.0.0.1:8080/process")
         self.assertEqual(request.get_method(), "POST")
         self.assertEqual(request_log[0].timeout, 12)
-        self.assertEqual(request.headers.get("X-openclaw-session-key"), "conversation-123")
+        self.assertEqual(
+            self._get_header_case_insensitive(request, "X-OpenClaw-Session-Key"),
+            "conversation-123",
+        )
 
         # Validate the request body matches OpenResponses schema
         request_body = json.loads(request.data.decode("utf-8"))
@@ -163,7 +176,10 @@ class AIBackendTests(unittest.TestCase):
         self.assertIsNotNone(auth_header)
         expected_auth = self._build_auth_header("secret-token-xyz")
         self.assertEqual(auth_header, expected_auth)
-        self.assertEqual(request.headers.get("X-openclaw-session-key"), "conversation-123")
+        self.assertEqual(
+            self._get_header_case_insensitive(request, "X-OpenClaw-Session-Key"),
+            "conversation-123",
+        )
 
     def test_openclaw_backend_omits_authorization_header_when_no_token(self) -> None:
         request_log: list[SimpleNamespace] = []
@@ -194,7 +210,10 @@ class AIBackendTests(unittest.TestCase):
         self.assertEqual(len(request_log), 1)
         request = request_log[0].request
         self.assertIsNone(request.headers.get("Authorization"))
-        self.assertEqual(request.headers.get("X-openclaw-session-key"), "conversation-123")
+        self.assertEqual(
+            self._get_header_case_insensitive(request, "X-OpenClaw-Session-Key"),
+            "conversation-123",
+        )
 
     def test_build_ai_backend_includes_auth_token_from_env(self) -> None:
         request_log: list[SimpleNamespace] = []

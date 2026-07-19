@@ -36,7 +36,7 @@ class AIBackendTests(unittest.TestCase):
         backend = MockBackend()
 
         self.assertIsInstance(backend, AIBackend)
-        self.assertEqual(backend.process("Hello", ["/tmp/a.txt"]), "Echo: Hello")
+        self.assertEqual(backend.process("Hello", ["/tmp/a.txt"], "conversation-123"), "Echo: Hello")
 
     def test_build_ai_backend_defaults_to_openclaw(self) -> None:
         backend = build_ai_backend({})
@@ -80,7 +80,7 @@ class AIBackendTests(unittest.TestCase):
         backend = OpenClawBackend("http://127.0.0.1:8080/process", timeout_seconds=12)
 
         with patch("bot.ai_backend.urlopen", side_effect=fake_urlopen):
-            response = backend.process("Hello", ["/tmp/one.txt", "/tmp/two.txt"])
+            response = backend.process("Hello", ["/tmp/one.txt", "/tmp/two.txt"], "conversation-123")
 
         self.assertEqual(response, "Processed")
         self.assertEqual(len(request_log), 1)
@@ -88,9 +88,11 @@ class AIBackendTests(unittest.TestCase):
         self.assertEqual(request.full_url, "http://127.0.0.1:8080/process")
         self.assertEqual(request.get_method(), "POST")
         self.assertEqual(request_log[0].timeout, 12)
+        self.assertEqual(request.headers.get("X-openclaw-session-key"), "conversation-123")
 
         # Validate the request body matches OpenResponses schema
         request_body = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(request_body["conversation"], "conversation-123")
         self.assertEqual(request_body["model"], "openclaw/default")
         self.assertIn("input", request_body)
         self.assertEqual(len(request_body["input"]), 1)
@@ -120,7 +122,7 @@ class AIBackendTests(unittest.TestCase):
         )
 
         with patch("bot.ai_backend.urlopen", side_effect=URLError("unreachable")):
-            response = backend.process("Hello", [])
+            response = backend.process("Hello", [], "conversation-123")
 
         self.assertEqual(response, "Echo: Hello")
         logger.error.assert_called_once()
@@ -152,7 +154,7 @@ class AIBackendTests(unittest.TestCase):
         )
 
         with patch("bot.ai_backend.urlopen", side_effect=fake_urlopen):
-            response = backend.process("Hello", [])
+            response = backend.process("Hello", [], "conversation-123")
 
         self.assertEqual(response, "Processed")
         self.assertEqual(len(request_log), 1)
@@ -161,6 +163,7 @@ class AIBackendTests(unittest.TestCase):
         self.assertIsNotNone(auth_header)
         expected_auth = self._build_auth_header("secret-token-xyz")
         self.assertEqual(auth_header, expected_auth)
+        self.assertEqual(request.headers.get("X-openclaw-session-key"), "conversation-123")
 
     def test_openclaw_backend_omits_authorization_header_when_no_token(self) -> None:
         request_log: list[SimpleNamespace] = []
@@ -185,12 +188,13 @@ class AIBackendTests(unittest.TestCase):
         backend = OpenClawBackend("http://127.0.0.1:8080/process", timeout_seconds=12)
 
         with patch("bot.ai_backend.urlopen", side_effect=fake_urlopen):
-            response = backend.process("Hello", [])
+            response = backend.process("Hello", [], "conversation-123")
 
         self.assertEqual(response, "Processed")
         self.assertEqual(len(request_log), 1)
         request = request_log[0].request
         self.assertIsNone(request.headers.get("Authorization"))
+        self.assertEqual(request.headers.get("X-openclaw-session-key"), "conversation-123")
 
     def test_build_ai_backend_includes_auth_token_from_env(self) -> None:
         request_log: list[SimpleNamespace] = []

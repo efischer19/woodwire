@@ -338,6 +338,7 @@ class WoodwireBot:
             response_text = self.ai_backend.process(
                 prompt_text,
                 [attachment.local_path for attachment in downloaded_attachments],
+                conversation_id,
             )
 
             return ProcessedPayload(

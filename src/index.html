@@ -115,37 +115,55 @@
       </section>
 
       <section class="chat-shell" aria-labelledby="conversation-heading">
-        <div class="chat-card">
-          <div class="chat-header">
-            <h2 id="conversation-heading">Conversation</h2>
-            <p class="chat-subtitle">
-              Send a message, then Woodwire will poll for your local bot's reply.
-            </p>
-          </div>
-
-          <section
-            id="message-history"
-            class="message-history"
-            aria-label="Message history"
-            aria-live="polite"
-            aria-relevant="additions text"
-            role="log"
-          >
-            <article class="message message-assistant">
-              <div class="message-body">
-                <p>
-                  Hello. Save your Worker connection details, then send a message to start
-                  chatting with your local AI bot.
-                </p>
+        <div class="chat-layout">
+          <aside class="conversation-sidebar" aria-labelledby="saved-conversations-heading">
+            <div class="conversation-sidebar-card">
+              <div class="conversation-sidebar-header">
+                <h2 id="saved-conversations-heading">Saved conversations</h2>
+                <button
+                  id="new-conversation"
+                  class="secondary-button conversation-new-button"
+                  type="button"
+                >
+                  New
+                </button>
               </div>
-              <p class="message-meta">
-                <span>Woodwire</span>
-                <time datetime="2026-06-30T13:08:55.701Z">Just now</time>
-              </p>
-            </article>
-          </section>
+              <p class="field-hint">Stored only in this browser.</p>
+              <ul id="conversation-list" class="conversation-list" aria-label="Saved conversations"></ul>
+            </div>
+          </aside>
 
-          <form id="composer" class="composer" aria-label="Send a message">
+          <div class="chat-card">
+            <div class="chat-header">
+              <h2 id="conversation-heading">Conversation</h2>
+              <p id="conversation-subtitle" class="chat-subtitle">
+                Start a new conversation or resume a saved thread from this browser.
+              </p>
+            </div>
+
+            <section
+              id="message-history"
+              class="message-history"
+              aria-label="Message history"
+              aria-live="polite"
+              aria-relevant="additions text"
+              role="log"
+            >
+              <article class="message message-assistant">
+                <div class="message-body">
+                  <p>
+                    Hello. Save your Worker connection details, then send a message to start
+                    chatting with your local AI bot.
+                  </p>
+                </div>
+                <p class="message-meta">
+                  <span>Woodwire</span>
+                  <time datetime="2026-06-30T13:08:55.701Z">Just now</time>
+                </p>
+              </article>
+            </section>
+
+            <form id="composer" class="composer" aria-label="Send a message">
             <label class="visually-hidden" for="message-input">Message</label>
             <textarea
               id="message-input"
@@ -219,7 +237,8 @@
               </p>
               <button id="send-button" class="primary-button" type="submit">Send</button>
             </div>
-          </form>
+            </form>
+          </div>
         </div>
       </section>
     </main>

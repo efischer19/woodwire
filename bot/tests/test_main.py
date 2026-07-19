@@ -89,7 +89,12 @@ class WoodwireBotTests(unittest.TestCase):
         bot = None
 
         class ShutdownBackend(MockBackend):
-            def process(self, _message: str, _attachments: list[str]) -> str:
+            def process(
+                self,
+                _message: str,
+                _attachments: list[str],
+                _conversation_id: str | None = None,
+            ) -> str:
                 bot.request_shutdown()
                 return "Echo: Hello"
 
@@ -122,13 +127,20 @@ class WoodwireBotTests(unittest.TestCase):
         sqs_client = Mock()
         s3_client = Mock()
         captured_attachments: list[str] = []
+        captured_conversation_ids: list[str | None] = []
         message_text = "Hello Woodwire"
 
         class RecordingBackend(MockBackend):
-            def process(self, message: str, attachments: list[str]) -> str:
+            def process(
+                self,
+                message: str,
+                attachments: list[str],
+                conversation_id: str | None = None,
+            ) -> str:
                 test_case.assertEqual(message, message_text)
                 captured_attachments.extend(attachments)
-                return super().process(message, attachments)
+                captured_conversation_ids.append(conversation_id)
+                return super().process(message, attachments, conversation_id)
 
         test_case = self
 
@@ -169,6 +181,7 @@ class WoodwireBotTests(unittest.TestCase):
                 os.path.join(conversation_temp_dir, "attachment-00-a.txt"),
                 os.path.join(conversation_temp_dir, "attachment-01-b.txt"),
             ])
+            self.assertEqual(captured_conversation_ids, ["conversation-123"])
             self.assertFalse(os.path.exists(conversation_temp_dir))
 
         self.assertEqual(s3_client.put_object.call_count, 2)
@@ -189,7 +202,12 @@ class WoodwireBotTests(unittest.TestCase):
         test_case = self
 
         class RecordingBackend(MockBackend):
-            def process(self, message: str, attachments: list[str]) -> str:
+            def process(
+                self,
+                message: str,
+                attachments: list[str],
+                _conversation_id: str | None = None,
+            ) -> str:
                 recorded_messages.append(message)
                 test_case.assertEqual(len(attachments), 1)
                 return "Spoken reply"
@@ -276,7 +294,12 @@ class WoodwireBotTests(unittest.TestCase):
         )
 
         class RecordingBackend(MockBackend):
-            def process(self, message: str, attachments: list[str]) -> str:
+            def process(
+                self,
+                message: str,
+                attachments: list[str],
+                _conversation_id: str | None = None,
+            ) -> str:
                 recorded_messages.append(message)
                 test_case.assertEqual(len(attachments), 1)
                 return "Encrypted reply"
@@ -367,7 +390,12 @@ class WoodwireBotTests(unittest.TestCase):
         test_case = self
 
         class RecordingBackend(MockBackend):
-            def process(self, message: str, attachments: list[str]) -> str:
+            def process(
+                self,
+                message: str,
+                attachments: list[str],
+                _conversation_id: str | None = None,
+            ) -> str:
                 recorded_messages.append(message)
                 test_case.assertEqual(len(attachments), 1)
                 return "Typed reply"
@@ -436,7 +464,12 @@ class WoodwireBotTests(unittest.TestCase):
         s3_client = Mock()
 
         class FailingBackend:
-            def process(self, _message: str, _attachments: list[str]) -> str:
+            def process(
+                self,
+                _message: str,
+                _attachments: list[str],
+                _conversation_id: str | None = None,
+            ) -> str:
                 raise ValueError("processor boom")
 
         bot = self.create_bot(
@@ -456,7 +489,12 @@ class WoodwireBotTests(unittest.TestCase):
         s3_client = Mock()
 
         class FailingBackend:
-            def process(self, _message: str, _attachments: list[str]) -> str:
+            def process(
+                self,
+                _message: str,
+                _attachments: list[str],
+                _conversation_id: str | None = None,
+            ) -> str:
                 raise ValueError("processor boom")
 
         bot = self.create_bot(
@@ -481,7 +519,12 @@ class WoodwireBotTests(unittest.TestCase):
         logger = Mock()
 
         class FailingBackend:
-            def process(self, _message: str, _attachments: list[str]) -> str:
+            def process(
+                self,
+                _message: str,
+                _attachments: list[str],
+                _conversation_id: str | None = None,
+            ) -> str:
                 raise ValueError("processor boom")
 
         s3_client.delete_object.side_effect = ClientError(

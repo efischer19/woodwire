@@ -132,6 +132,81 @@ describe('Woodwire Worker', () => {
     });
   });
 
+  test('reuses a valid conversation ID from the request payload', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(new Response('<SendMessageResponse />', { status: 200 }));
+    const worker = createWorker({
+      createAwsClient: () => ({
+        fetch: mockFetch,
+      }),
+    });
+
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/message', {
+        body: JSON.stringify({
+          attachments: [],
+          conversationId: 'existing-thread_123',
+          text: 'Resume this thread',
+        }),
+        headers: {
+          'content-type': 'application/json',
+          'X-Woodwire-Auth': baseEnv.WOODWIRE_AUTH,
+        },
+        method: 'POST',
+      }),
+      baseEnv,
+      {},
+    );
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({
+      conversationId: 'existing-thread_123',
+      status: 'pending',
+    });
+    const sentBody = new URLSearchParams(mockFetch.mock.calls[0][1].body);
+    expect(JSON.parse(sentBody.get('MessageBody'))).toMatchObject({
+      conversationId: 'existing-thread_123',
+      text: 'Resume this thread',
+    });
+  });
+
+  test('falls back to a new conversation ID when the request payload uses an invalid one', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(new Response('<SendMessageResponse />', { status: 200 }));
+    const worker = createWorker({
+      createAwsClient: () => ({
+        fetch: mockFetch,
+      }),
+    });
+    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('generated-conversation-456');
+
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/message', {
+        body: JSON.stringify({
+          attachments: [],
+          conversationId: '../bad-prefix',
+          text: 'Start safely',
+        }),
+        headers: {
+          'content-type': 'application/json',
+          'X-Woodwire-Auth': baseEnv.WOODWIRE_AUTH,
+        },
+        method: 'POST',
+      }),
+      baseEnv,
+      {},
+    );
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({
+      conversationId: 'generated-conversation-456',
+      status: 'pending',
+    });
+    const sentBody = new URLSearchParams(mockFetch.mock.calls[0][1].body);
+    expect(JSON.parse(sentBody.get('MessageBody'))).toMatchObject({
+      conversationId: 'generated-conversation-456',
+      text: 'Start safely',
+    });
+  });
+
   test('returns validation errors for malformed message payloads', async () => {
     const worker = createWorker();
     const response = await worker.fetch(

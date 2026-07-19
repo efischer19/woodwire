@@ -142,8 +142,6 @@ class OpenClawBackend:
                 }
             ],
         }
-        if conversation_id:
-            request_body["conversation"] = conversation_id
 
         request = Request(
             self.endpoint,

@@ -310,7 +310,7 @@ function initChatApp() {
 function getAppElements() {
   return {
     attachmentButton: document.getElementById("attachment-button"),
-    attachmentButtonBadge: document.getElementById("attachment-button-badge"),
+    attachmentToggleBadge: document.getElementById("attachment-button-badge"),
     attachmentInput: document.getElementById("attachment-input"),
     attachmentPickerButton: document.getElementById("attachment-picker-button"),
     attachmentPreviews: document.getElementById("attachment-previews"),
@@ -379,17 +379,14 @@ function refreshComposerControls(elements, state) {
   );
   const canAddMoreAttachments = state.composerAttachments.length < MAX_ATTACHMENT_COUNT;
   const isRecordingVoiceMemo = state.voiceMemo.isRecording;
-  const canAcceptNewAttachments = canQueueComposerAttachments(
-    hasConnectionDetails,
-    canAddMoreAttachments,
-    isRecordingVoiceMemo,
-  );
 
   elements.attachmentButton.disabled = !hasConnectionDetails;
   if (elements.attachmentPickerButton) {
-    elements.attachmentPickerButton.disabled = !canAcceptNewAttachments;
+    elements.attachmentPickerButton.disabled =
+      !hasConnectionDetails || !canAddMoreAttachments || isRecordingVoiceMemo;
   }
-  elements.attachmentInput.disabled = !canAcceptNewAttachments;
+  elements.attachmentInput.disabled =
+    !hasConnectionDetails || !canAddMoreAttachments || isRecordingVoiceMemo;
   elements.sendButton.disabled =
     !hasConnectionDetails || hasUploadingAttachment || isRecordingVoiceMemo;
 
@@ -407,10 +404,6 @@ function refreshComposerControls(elements, state) {
       !canAddMoreAttachments ||
       isRecordingVoiceMemo;
   }
-}
-
-function canQueueComposerAttachments(hasConnectionDetails, canAddMoreAttachments, isRecordingVoiceMemo) {
-  return hasConnectionDetails && canAddMoreAttachments && !isRecordingVoiceMemo;
 }
 
 async function handleAttachmentSelection(files, elements, state) {
@@ -792,14 +785,22 @@ function renderComposerDrawer(elements, state) {
   elements.attachmentButton.classList.toggle("has-pending-items", badgeCount > 0);
   elements.attachmentButton.setAttribute("aria-expanded", String(isVisible));
 
-  if (elements.attachmentButtonBadge) {
-    elements.attachmentButtonBadge.classList.toggle("is-hidden", badgeCount === 0);
-    elements.attachmentButtonBadge.textContent = badgeCount === 0
-      ? ""
-      : badgeCount > 9
-        ? "9+"
-        : String(badgeCount);
+  if (elements.attachmentToggleBadge) {
+    elements.attachmentToggleBadge.classList.toggle("is-hidden", badgeCount === 0);
+    elements.attachmentToggleBadge.textContent = formatComposerDrawerBadgeCount(badgeCount);
   }
+}
+
+function formatComposerDrawerBadgeCount(badgeCount) {
+  if (badgeCount === 0) {
+    return "";
+  }
+
+  if (badgeCount > 9) {
+    return "9+";
+  }
+
+  return String(badgeCount);
 }
 
 function updateConnectivity(elements) {

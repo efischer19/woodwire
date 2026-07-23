@@ -361,9 +361,7 @@ function hydrateSetupForm(elements) {
 function updateConnectionUi(elements) {
   const hasConnectionDetails = hasSavedConnectionCredentials();
   elements.attachmentButton.disabled = !hasConnectionDetails;
-  if (elements.attachmentPickerButton) {
-    elements.attachmentPickerButton.disabled = !hasConnectionDetails;
-  }
+  elements.attachmentPickerButton.disabled = !hasConnectionDetails;
   elements.attachmentInput.disabled = !hasConnectionDetails;
   elements.messageInput.disabled = !hasConnectionDetails;
   elements.sendButton.disabled = !hasConnectionDetails;
@@ -381,10 +379,8 @@ function refreshComposerControls(elements, state) {
   const isRecordingVoiceMemo = state.voiceMemo.isRecording;
 
   elements.attachmentButton.disabled = !hasConnectionDetails;
-  if (elements.attachmentPickerButton) {
-    elements.attachmentPickerButton.disabled =
-      !hasConnectionDetails || !canAddMoreAttachments || isRecordingVoiceMemo;
-  }
+  elements.attachmentPickerButton.disabled =
+    !hasConnectionDetails || !canAddMoreAttachments || isRecordingVoiceMemo;
   elements.attachmentInput.disabled =
     !hasConnectionDetails || !canAddMoreAttachments || isRecordingVoiceMemo;
   elements.sendButton.disabled =
@@ -753,15 +749,19 @@ function toggleSetupPanel(elements, shouldShow) {
 }
 
 function hasComposerDrawerPendingItems(state) {
-  const hasPendingVoiceMemo = state.voiceMemo.isRecording || Boolean(state.voiceMemo.previewUrl);
+  const hasPendingVoiceMemo = hasPendingVoiceMemoStage(state);
 
   return state.composerAttachments.length > 0 || hasPendingVoiceMemo;
 }
 
 function getComposerDrawerBadgeCount(state) {
-  const hasPendingVoiceMemo = state.voiceMemo.isRecording || Boolean(state.voiceMemo.previewUrl);
+  const hasPendingVoiceMemo = hasPendingVoiceMemoStage(state);
 
   return state.composerAttachments.length + (hasPendingVoiceMemo ? 1 : 0);
+}
+
+function hasPendingVoiceMemoStage(state) {
+  return state.voiceMemo.isRecording || Boolean(state.voiceMemo.previewUrl);
 }
 
 function isComposerDrawerVisible(state) {

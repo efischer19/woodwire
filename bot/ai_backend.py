@@ -132,7 +132,7 @@ class OpenClawBackend:
                     "file_url": attachment_path,
                 })
 
-        request_body = {
+        request_body: dict[str, Any] = {
             "model": self.model,
             "input": [
                 {
@@ -142,6 +142,8 @@ class OpenClawBackend:
                 }
             ],
         }
+        if conversation_id:
+            request_body["conversation"] = conversation_id
 
         request = Request(
             self.endpoint,

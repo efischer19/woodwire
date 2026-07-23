@@ -399,7 +399,7 @@ function refreshComposerControls(elements, state) {
 
   if (elements.voiceMemoAttachButton) {
     elements.voiceMemoAttachButton.disabled =
-    !hasConnectionDetails ||
+      !hasConnectionDetails ||
       !state.voiceMemo.recordedBlob ||
       !canAddMoreAttachments ||
       isRecordingVoiceMemo;

@@ -760,11 +760,15 @@ function toggleSetupPanel(elements, shouldShow) {
 }
 
 function hasComposerDrawerPendingItems(state) {
-  return state.composerAttachments.length > 0 || state.voiceMemo.isRecording || Boolean(state.voiceMemo.previewUrl);
+  const hasPendingVoiceMemo = state.voiceMemo.isRecording || Boolean(state.voiceMemo.previewUrl);
+
+  return state.composerAttachments.length > 0 || hasPendingVoiceMemo;
 }
 
 function getComposerDrawerBadgeCount(state) {
-  return state.composerAttachments.length + Number(state.voiceMemo.isRecording || state.voiceMemo.previewUrl);
+  const hasPendingVoiceMemo = state.voiceMemo.isRecording || Boolean(state.voiceMemo.previewUrl);
+
+  return state.composerAttachments.length + (hasPendingVoiceMemo ? 1 : 0);
 }
 
 function isComposerDrawerVisible(state) {
@@ -789,9 +793,12 @@ function renderComposerDrawer(elements, state) {
   elements.attachmentButton.setAttribute("aria-expanded", String(isVisible));
 
   if (elements.attachmentButtonBadge) {
-    const badgeText = badgeCount > 9 ? "9+" : String(badgeCount);
     elements.attachmentButtonBadge.classList.toggle("is-hidden", badgeCount === 0);
-    elements.attachmentButtonBadge.textContent = badgeCount === 0 ? "" : badgeText;
+    elements.attachmentButtonBadge.textContent = badgeCount === 0
+      ? ""
+      : badgeCount > 9
+        ? "9+"
+        : String(badgeCount);
   }
 }
 

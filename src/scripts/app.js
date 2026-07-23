@@ -379,14 +379,17 @@ function refreshComposerControls(elements, state) {
   );
   const canAddMoreAttachments = state.composerAttachments.length < MAX_ATTACHMENT_COUNT;
   const isRecordingVoiceMemo = state.voiceMemo.isRecording;
+  const canAcceptNewAttachments = canQueueComposerAttachments(
+    hasConnectionDetails,
+    canAddMoreAttachments,
+    isRecordingVoiceMemo,
+  );
 
   elements.attachmentButton.disabled = !hasConnectionDetails;
   if (elements.attachmentPickerButton) {
-    elements.attachmentPickerButton.disabled =
-      !hasConnectionDetails || !canAddMoreAttachments || isRecordingVoiceMemo;
+    elements.attachmentPickerButton.disabled = !canAcceptNewAttachments;
   }
-  elements.attachmentInput.disabled =
-    !hasConnectionDetails || !canAddMoreAttachments || isRecordingVoiceMemo;
+  elements.attachmentInput.disabled = !canAcceptNewAttachments;
   elements.sendButton.disabled =
     !hasConnectionDetails || hasUploadingAttachment || isRecordingVoiceMemo;
 
@@ -404,6 +407,10 @@ function refreshComposerControls(elements, state) {
       !canAddMoreAttachments ||
       isRecordingVoiceMemo;
   }
+}
+
+function canQueueComposerAttachments(hasConnectionDetails, canAddMoreAttachments, isRecordingVoiceMemo) {
+  return hasConnectionDetails && canAddMoreAttachments && !isRecordingVoiceMemo;
 }
 
 async function handleAttachmentSelection(files, elements, state) {
@@ -757,7 +764,7 @@ function hasComposerDrawerPendingItems(state) {
 }
 
 function getComposerDrawerBadgeCount(state) {
-  return state.composerAttachments.length + (state.voiceMemo.isRecording || state.voiceMemo.previewUrl ? 1 : 0);
+  return state.composerAttachments.length + Number(state.voiceMemo.isRecording || state.voiceMemo.previewUrl);
 }
 
 function isComposerDrawerVisible(state) {

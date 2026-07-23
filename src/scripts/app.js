@@ -60,6 +60,7 @@ function initChatApp() {
     activeConversationId: getActiveConversationId(),
     composerAttachments: [],
     conversations: getStoredConversations(),
+    isComposerDrawerExpanded: false,
     isDrainingQueue: false,
     pendingConversations: new Map(
       getPendingConversations().map((conversation) => [conversation.conversationId, conversation]),
@@ -173,6 +174,17 @@ function initChatApp() {
   });
 
   elements.attachmentButton.addEventListener("click", () => {
+    if (!hasSavedConnectionCredentials()) {
+      toggleSetupPanel(elements, true);
+      showFlashMessage(elements, "Save your passphrase and E2EE key before adding attachments.", true);
+      focusSetupField(elements);
+      return;
+    }
+
+    setComposerDrawerExpanded(elements, state, !state.isComposerDrawerExpanded);
+  });
+
+  elements.attachmentPickerButton?.addEventListener("click", () => {
     if (!hasSavedConnectionCredentials()) {
       toggleSetupPanel(elements, true);
       showFlashMessage(elements, "Save your passphrase and E2EE key before adding attachments.", true);
@@ -298,11 +310,14 @@ function initChatApp() {
 function getAppElements() {
   return {
     attachmentButton: document.getElementById("attachment-button"),
+    attachmentToggleBadge: document.getElementById("attachment-button-badge"),
     attachmentInput: document.getElementById("attachment-input"),
+    attachmentPickerButton: document.getElementById("attachment-picker-button"),
     attachmentPreviews: document.getElementById("attachment-previews"),
     attachmentStatus: document.getElementById("attachment-status"),
     autoplayVoice: document.getElementById("autoplay-voice"),
     composer: document.getElementById("composer"),
+    composerDrawer: document.getElementById("composer-drawer"),
     conversationList: document.getElementById("conversation-list"),
     conversationSubtitle: document.getElementById("conversation-subtitle"),
     connectionSettings: document.getElementById("connection-settings"),
@@ -346,6 +361,7 @@ function hydrateSetupForm(elements) {
 function updateConnectionUi(elements) {
   const hasConnectionDetails = hasSavedConnectionCredentials();
   elements.attachmentButton.disabled = !hasConnectionDetails;
+  elements.attachmentPickerButton.disabled = !hasConnectionDetails;
   elements.attachmentInput.disabled = !hasConnectionDetails;
   elements.messageInput.disabled = !hasConnectionDetails;
   elements.sendButton.disabled = !hasConnectionDetails;
@@ -362,7 +378,8 @@ function refreshComposerControls(elements, state) {
   const canAddMoreAttachments = state.composerAttachments.length < MAX_ATTACHMENT_COUNT;
   const isRecordingVoiceMemo = state.voiceMemo.isRecording;
 
-  elements.attachmentButton.disabled =
+  elements.attachmentButton.disabled = !hasConnectionDetails;
+  elements.attachmentPickerButton.disabled =
     !hasConnectionDetails || !canAddMoreAttachments || isRecordingVoiceMemo;
   elements.attachmentInput.disabled =
     !hasConnectionDetails || !canAddMoreAttachments || isRecordingVoiceMemo;
@@ -378,7 +395,7 @@ function refreshComposerControls(elements, state) {
 
   if (elements.voiceMemoAttachButton) {
     elements.voiceMemoAttachButton.disabled =
-    !hasConnectionDetails ||
+      !hasConnectionDetails ||
       !state.voiceMemo.recordedBlob ||
       !canAddMoreAttachments ||
       isRecordingVoiceMemo;
@@ -676,6 +693,7 @@ function renderPendingAttachments(elements, state) {
   }
 
   elements.attachmentStatus.textContent = getAttachmentSummary(attachments);
+  renderComposerDrawer(elements, state);
 }
 
 function getAttachmentStatusText(attachment) {
@@ -728,6 +746,61 @@ function formatAttachmentSize(sizeBytes) {
 function toggleSetupPanel(elements, shouldShow) {
   elements.setupPanel.classList.toggle("is-hidden", !shouldShow);
   elements.connectionSettings.setAttribute("aria-expanded", String(shouldShow));
+}
+
+function hasComposerDrawerPendingItems(state) {
+  const hasPendingVoiceMemo = hasPendingVoiceMemoStage(state);
+
+  return state.composerAttachments.length > 0 || hasPendingVoiceMemo;
+}
+
+function getComposerDrawerBadgeCount(state) {
+  const hasPendingVoiceMemo = hasPendingVoiceMemoStage(state);
+
+  return state.composerAttachments.length + (hasPendingVoiceMemo ? 1 : 0);
+}
+
+function hasPendingVoiceMemoStage(state) {
+  return state.voiceMemo.isRecording || Boolean(state.voiceMemo.previewUrl);
+}
+
+function shouldShowComposerDrawer(state) {
+  return state.isComposerDrawerExpanded || hasComposerDrawerPendingItems(state);
+}
+
+function setComposerDrawerExpanded(elements, state, shouldExpand) {
+  state.isComposerDrawerExpanded = shouldExpand;
+  renderComposerDrawer(elements, state);
+}
+
+function renderComposerDrawer(elements, state) {
+  if (!elements.composerDrawer || !elements.attachmentButton) {
+    return;
+  }
+
+  const badgeCount = getComposerDrawerBadgeCount(state);
+  const isVisible = shouldShowComposerDrawer(state);
+  elements.composerDrawer.classList.toggle("is-hidden", !isVisible);
+  elements.attachmentButton.classList.toggle("is-active", isVisible);
+  elements.attachmentButton.classList.toggle("has-pending-items", badgeCount > 0);
+  elements.attachmentButton.setAttribute("aria-expanded", String(isVisible));
+
+  if (elements.attachmentToggleBadge) {
+    elements.attachmentToggleBadge.classList.toggle("is-hidden", badgeCount === 0);
+    elements.attachmentToggleBadge.textContent = formatComposerDrawerBadgeCount(badgeCount);
+  }
+}
+
+function formatComposerDrawerBadgeCount(badgeCount) {
+  if (badgeCount === 0) {
+    return "";
+  }
+
+  if (badgeCount > 9) {
+    return "9+";
+  }
+
+  return String(badgeCount);
 }
 
 function updateConnectivity(elements) {
@@ -1890,6 +1963,8 @@ function renderVoiceMemoState(elements, state) {
   if (!hasPreview) {
     elements.voiceMemoPreviewSummary.textContent = VOICE_MEMO_READY_TEXT;
   }
+
+  renderComposerDrawer(elements, state);
 }
 
 function announceVoiceMemo(elements, message) {

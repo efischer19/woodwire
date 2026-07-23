@@ -164,79 +164,105 @@
             </section>
 
             <form id="composer" class="composer" aria-label="Send a message">
-            <label class="visually-hidden" for="message-input">Message</label>
-            <textarea
-              id="message-input"
-              name="message"
-              rows="3"
-              placeholder="Type a message for your local AI bot"
-              required
-            ></textarea>
-            <input
-              id="attachment-input"
-              class="visually-hidden"
-              type="file"
-              accept="image/*,application/pdf,text/*"
-              multiple
-            >
-            <div class="composer-tools">
-              <button
-                id="attachment-button"
-                class="secondary-button composer-attachment-button"
-                type="button"
-                aria-label="Attach a file"
+              <label class="visually-hidden" for="message-input">Message</label>
+              <input
+                id="attachment-input"
+                class="visually-hidden"
+                type="file"
+                accept="image/*,application/pdf,text/*"
+                multiple
               >
-                <span aria-hidden="true">📎</span>
-                <span>Attach</span>
-              </button>
-              <button
-                id="voice-memo-button"
-                class="secondary-button composer-voice-button is-hidden"
-                type="button"
-                aria-label="Record voice memo"
-                aria-pressed="false"
-                hidden
-              >
-                <span aria-hidden="true">🎤</span>
-                <span id="voice-memo-button-text">Record</span>
-              </button>
-              <p class="field-hint">Attach up to 5 items (images, PDFs, text, or voice memos), up to 25 MB each.</p>
-            </div>
-            <section
-              id="attachment-previews"
-              class="attachment-previews is-hidden"
-              aria-label="Pending attachments"
-            ></section>
-            <section
-              id="voice-memo-panel"
-              class="voice-memo-panel is-hidden"
-              aria-label="Voice memo recorder"
-            >
-              <div id="voice-memo-recording" class="voice-memo-recording is-hidden">
-                <span class="voice-memo-pulse" aria-hidden="true"></span>
-                <p id="voice-memo-elapsed" class="voice-memo-elapsed">Recording… 0:00</p>
-              </div>
-              <div id="voice-memo-preview" class="voice-memo-preview is-hidden">
-                <p id="voice-memo-preview-summary" class="voice-memo-preview-summary">Voice memo ready.</p>
-                <audio id="voice-memo-audio" controls preload="metadata"></audio>
-                <div class="voice-memo-actions">
-                  <button id="voice-memo-rerecord" class="secondary-button" type="button">
-                    Re-record
+              <div class="composer-bar">
+                <textarea
+                  id="message-input"
+                  name="message"
+                  rows="3"
+                  placeholder="Type a message for your local AI bot"
+                  required
+                ></textarea>
+                <div class="composer-primary-actions">
+                  <button
+                    id="attachment-button"
+                    class="secondary-button composer-drawer-toggle"
+                    type="button"
+                    aria-label="Show attachments and voice memo options"
+                    aria-controls="composer-drawer"
+                    aria-expanded="false"
+                  >
+                    <span aria-hidden="true">📎</span>
+                    <span class="visually-hidden">Attachments and voice memo</span>
+                    <span
+                      id="attachment-button-badge"
+                      class="composer-toggle-badge is-hidden"
+                      aria-hidden="true"
+                    ></span>
                   </button>
-                  <button id="voice-memo-attach" class="primary-button" type="button">
-                    Attach voice memo
-                  </button>
+                  <button id="send-button" class="primary-button" type="submit">Send</button>
                 </div>
               </div>
-            </section>
-            <p id="attachment-status" class="queue-status" role="status" aria-live="polite"></p>
-
-            <div class="composer-actions">
+              <section
+                id="composer-drawer"
+                class="composer-drawer is-hidden"
+                aria-label="Attachments and voice memo options"
+              >
+                <div class="composer-tools">
+                  <button
+                    id="attachment-picker-button"
+                    class="secondary-button composer-attachment-button"
+                    type="button"
+                    aria-label="Attach a file"
+                    aria-describedby="composer-drawer-hint"
+                  >
+                    <span aria-hidden="true">📎</span>
+                    <span>Attach</span>
+                  </button>
+                  <button
+                    id="voice-memo-button"
+                    class="secondary-button composer-voice-button is-hidden"
+                    type="button"
+                    aria-label="Record voice memo"
+                    aria-pressed="false"
+                    hidden
+                  >
+                    <span aria-hidden="true">🎤</span>
+                    <span id="voice-memo-button-text">Record</span>
+                  </button>
+                </div>
+                <p id="composer-drawer-hint" class="field-hint">
+                  Attach up to 5 items (images, PDFs, text, or voice memos), up to 25 MB each.
+                </p>
+                <section
+                  id="attachment-previews"
+                  class="attachment-previews is-hidden"
+                  aria-label="Pending attachments"
+                ></section>
+                <section
+                  id="voice-memo-panel"
+                  class="voice-memo-panel is-hidden"
+                  aria-label="Voice memo recorder"
+                >
+                  <div id="voice-memo-recording" class="voice-memo-recording is-hidden">
+                    <span class="voice-memo-pulse" aria-hidden="true"></span>
+                    <p id="voice-memo-elapsed" class="voice-memo-elapsed">Recording… 0:00</p>
+                  </div>
+                  <div id="voice-memo-preview" class="voice-memo-preview is-hidden">
+                    <p id="voice-memo-preview-summary" class="voice-memo-preview-summary">Voice memo ready.</p>
+                    <audio id="voice-memo-audio" controls preload="metadata"></audio>
+                    <div class="voice-memo-actions">
+                      <button id="voice-memo-rerecord" class="secondary-button" type="button">
+                        Re-record
+                      </button>
+                      <button id="voice-memo-attach" class="primary-button" type="button">
+                        Attach voice memo
+                      </button>
+                    </div>
+                  </div>
+                </section>
+                <p id="attachment-status" class="queue-status" role="status" aria-live="polite"></p>
+              </section>
               <p id="queue-status" class="queue-status" role="status" aria-live="polite">
                 Save your passphrase and E2EE key to start sending messages.
               </p>
-              <button id="send-button" class="primary-button" type="submit">Send</button>
-            </div>
             </form>
           </div>
         </div>

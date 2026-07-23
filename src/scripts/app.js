@@ -181,7 +181,7 @@ function initChatApp() {
       return;
     }
 
-    setComposerDrawerExpanded(elements, state, !isComposerDrawerVisible(state));
+    setComposerDrawerExpanded(elements, state, !state.isComposerDrawerExpanded);
   });
 
   elements.attachmentPickerButton?.addEventListener("click", () => {
@@ -764,7 +764,7 @@ function hasPendingVoiceMemoStage(state) {
   return state.voiceMemo.isRecording || Boolean(state.voiceMemo.previewUrl);
 }
 
-function isComposerDrawerVisible(state) {
+function shouldShowComposerDrawer(state) {
   return state.isComposerDrawerExpanded || hasComposerDrawerPendingItems(state);
 }
 
@@ -779,7 +779,7 @@ function renderComposerDrawer(elements, state) {
   }
 
   const badgeCount = getComposerDrawerBadgeCount(state);
-  const isVisible = isComposerDrawerVisible(state);
+  const isVisible = shouldShowComposerDrawer(state);
   elements.composerDrawer.classList.toggle("is-hidden", !isVisible);
   elements.attachmentButton.classList.toggle("is-active", isVisible);
   elements.attachmentButton.classList.toggle("has-pending-items", badgeCount > 0);

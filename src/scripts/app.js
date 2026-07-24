@@ -63,7 +63,10 @@ function initChatApp() {
     isComposerDrawerExpanded: false,
     isDrainingQueue: false,
     pendingConversations: new Map(
-      getPendingConversations().map((conversation) => [conversation.conversationId, conversation]),
+      getPendingConversations().map((conversation) => [
+        conversation.localId || conversation.conversationId,
+        conversation,
+      ]),
     ),
     pollTimer: 0,
     queueRetryTimer: 0,
@@ -865,6 +868,7 @@ async function sendMessage(message, elements, state) {
     trackPendingConversation(state, {
       conversationId: payload.conversationId,
       localId: message.localId,
+      responseId: getLatestConversationResponseId(elements, payload.conversationId),
       startedAt: Date.now(),
     });
     renderConversationList(elements, state);
@@ -905,12 +909,12 @@ async function sendMessage(message, elements, state) {
 }
 
 function trackPendingConversation(state, conversation) {
-  state.pendingConversations.set(conversation.conversationId, conversation);
+  state.pendingConversations.set(conversation.localId, conversation);
   syncPendingConversations(state);
 }
 
-function clearPendingConversation(conversationId, state) {
-  state.pendingConversations.delete(conversationId);
+function clearPendingConversation(localId, state) {
+  state.pendingConversations.delete(localId);
   syncPendingConversations(state);
 }
 
@@ -963,7 +967,7 @@ function stopPollingLoop(state) {
 
 async function pollConversation(conversation, elements, state) {
   if (Date.now() - conversation.startedAt >= POLL_TIMEOUT_MS) {
-    clearPendingConversation(conversation.conversationId, state);
+    clearPendingConversation(conversation.localId, state);
     updateMessageStatus(
       elements,
       conversation.localId,
@@ -987,20 +991,26 @@ async function pollConversation(conversation, elements, state) {
     }
 
     const payload = await response.json();
-    const statusLabel =
-      payload.status === "complete"
-        ? payload.hasAudio
-          ? "Voice reply ready"
-          : "Reply ready"
-        : payload.status === "processing"
-          ? "Bot is replying…"
-          : "Waiting for the bot…";
+    const hasNewResponse = hasPendingConversationResponse(conversation, payload);
+    const statusLabel = hasNewResponse
+      ? payload.hasAudio
+        ? "Voice reply ready"
+        : "Reply ready"
+      : payload.status === "processing"
+        ? "Bot is replying…"
+        : "Waiting for the bot…";
 
     updateMessageStatus(elements, conversation.localId, statusLabel, false);
 
-    if (payload.status === "complete") {
-      await appendAssistantReply(conversation, elements);
-      clearPendingConversation(conversation.conversationId, state);
+    if (hasNewResponse) {
+      const responseId = await appendAssistantReply(conversation, elements);
+      if (!responseId) {
+        return {
+          nextDelayMs: normalizePollDelay(payload.cacheTtlSeconds),
+        };
+      }
+
+      clearPendingConversation(conversation.localId, state);
       updateMessageStatus(elements, conversation.localId, "Reply received", false);
     }
 
@@ -1035,7 +1045,7 @@ async function pollConversation(conversation, elements, state) {
       return { nextDelayMs: getBackoffDelay(error) };
     }
 
-    clearPendingConversation(conversation.conversationId, state);
+    clearPendingConversation(conversation.localId, state);
     updateMessageStatus(elements, conversation.localId, error.message, true);
     showFlashMessage(elements, error.message, true);
     return { nextDelayMs: POLL_INTERVAL_MS };
@@ -1043,14 +1053,6 @@ async function pollConversation(conversation, elements, state) {
 }
 
 async function appendAssistantReply(conversation, elements) {
-  if (
-    elements.messageHistory.querySelector(
-      `[data-response-for="${conversation.conversationId}"]`,
-    )
-  ) {
-    return;
-  }
-
   const response = await workerFetch(`/api/response/${conversation.conversationId}`, {
     method: "GET",
   });
@@ -1059,6 +1061,14 @@ async function appendAssistantReply(conversation, elements) {
   }
 
   const payload = await response.json();
+  if (!payload.responseId || payload.responseId === conversation.responseId) {
+    return null;
+  }
+
+  if (elements.messageHistory.querySelector(`[data-response-id="${payload.responseId}"]`)) {
+    return payload.responseId;
+  }
+
   let transcript = normalizeAssistantTranscript(payload.transcript);
   const transcriptUrl = normalizeVoiceResponseAudioUrl(payload.transcriptUrl);
   if (!transcript && transcriptUrl) {
@@ -1072,21 +1082,23 @@ async function appendAssistantReply(conversation, elements) {
       appendMessage(elements, {
         author: "AI",
         conversationId: conversation.conversationId,
-        responseFor: conversation.conversationId,
+        responseFor: conversation.localId,
+        responseId: payload.responseId,
         text: "Unable to decrypt AI reply. Check your saved E2EE key.",
         timestamp: new Date().toISOString(),
         variant: "assistant",
       });
       showFlashMessage(elements, error.message, true);
       announce(elements, "The AI reply could not be decrypted.");
-      return;
+      return payload.responseId;
     }
   }
   const audioUrl = normalizeVoiceResponseAudioUrl(payload.audioUrl);
   appendMessage(elements, {
     author: "AI",
     conversationId: conversation.conversationId,
-    responseFor: conversation.conversationId,
+    responseFor: conversation.localId,
+    responseId: payload.responseId,
     text: getAssistantReplyText(transcript, audioUrl),
     timestamp: new Date().toISOString(),
     variant: "assistant",
@@ -1107,6 +1119,7 @@ async function appendAssistantReply(conversation, elements) {
         : "AI voice reply received without transcript."
       : "AI reply received.",
   );
+  return payload.responseId;
 }
 
 async function drainQueue(elements, state) {
@@ -1178,7 +1191,11 @@ function renderStoredMessages(elements) {
         attachments: normalizeStoredAttachments(message.attachments),
         conversationId: message.conversationId,
         localId: message.role === "user" ? message.id : undefined,
-        responseFor: message.role === "ai" ? message.conversationId || message.id : undefined,
+        responseFor:
+          message.role === "ai"
+            ? message.responseFor || message.conversationId || message.id
+            : undefined,
+        responseId: message.role === "ai" ? message.id : undefined,
         status: message.role === "user" ? message.status || undefined : undefined,
         text: message.text,
         timestamp: message.timestamp,
@@ -1207,6 +1224,10 @@ function appendMessage(elements, message, options = {}) {
 
   if (message.responseFor) {
     article.dataset.responseFor = message.responseFor;
+  }
+
+  if (message.responseId) {
+    article.dataset.responseId = message.responseId;
   }
 
   const body = document.createElement("div");
@@ -1325,8 +1346,12 @@ function upsertStoredMessage(message) {
   const storedMessage = {
     attachments: serializeStoredAttachments(message.attachments),
     conversationId: message.conversationId || message.responseFor || null,
-    id: message.variant === "assistant" ? message.responseFor : message.localId,
+    id:
+      message.variant === "assistant"
+        ? message.responseId || message.responseFor
+        : message.localId,
     role: message.variant === "assistant" ? "ai" : "user",
+    responseFor: message.variant === "assistant" ? message.responseFor || null : null,
     status: message.status || null,
     text: message.text,
     timestamp: message.timestamp,
@@ -2044,6 +2069,32 @@ async function getVoiceResponseAudioObjectUrl(conversationId, downloadUrl = "") 
 
 function getPendingConversations() {
   return getStorageJson(STORAGE_KEYS.pendingConversations, []);
+}
+
+function getLatestConversationResponseId(elements, conversationId) {
+  if (!conversationId) {
+    return null;
+  }
+
+  const assistantReplies = Array.from(
+    elements.messageHistory.querySelectorAll(
+      `[data-conversation-id="${conversationId}"][data-response-id]`,
+    ),
+  );
+
+  return assistantReplies.at(-1)?.dataset.responseId || null;
+}
+
+function hasPendingConversationResponse(conversation, payload) {
+  if (payload.status !== "complete") {
+    return false;
+  }
+
+  if (!conversation.responseId) {
+    return true;
+  }
+
+  return Boolean(payload.latestResponseId) && payload.latestResponseId !== conversation.responseId;
 }
 
 function syncPendingConversations(state) {

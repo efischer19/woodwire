@@ -201,6 +201,7 @@ objects in S3. Results are cached at the Cloudflare edge for 2–5 seconds per
   "status": "pending",
   "hasAudio": false,
   "hasTranscript": false,
+  "latestResponseId": null,
   "cacheTtlSeconds": 3
 }
 ```
@@ -221,15 +222,16 @@ Returns response content or a pre-signed download URL for bot output.
 
 ```json
 {
-  "transcript": "AI response text here...",
+  "responseId": "1719758400000-response",
+  "transcriptUrl": "https://example-presigned-transcript-url",
   "audioUrl": "https://example-presigned-url"
 }
 ```
 
 The Worker lists `outbox/{conversationId}/`, ignores the
-`processing.json` marker, reads any `.md` transcript object, and returns a
-pre-signed `GET` URL for any `.mp3` audio object it finds. Download URLs
-expire in 15 minutes.
+`processing.json` marker, selects the newest response group by its
+`*-response` filename prefix, and returns pre-signed `GET` URLs for the
+latest transcript and/or audio objects. Download URLs expire in 15 minutes.
 
 ## Error Codes
 

@@ -279,6 +279,7 @@ async function handleStatusRequest(request, env, context, dependencies) {
       conversationId,
       hasAudio: Boolean(responseFiles.audioKey),
       hasTranscript: Boolean(responseFiles.transcriptKey),
+      latestResponseId: responseFiles.responseId,
       status: responseFiles.status,
     },
     {
@@ -461,7 +462,11 @@ async function handleResponseRequest(request, env, dependencies) {
         : Promise.resolve(null),
     ]);
 
-    return createResponse(request, env, 200, { audioUrl, transcriptUrl });
+    return createResponse(request, env, 200, {
+      audioUrl,
+      responseId: responseFiles.responseId,
+      transcriptUrl,
+    });
   } catch {
     return createResponse(request, env, 502, { error: 'Bad Gateway' });
   }
@@ -512,18 +517,100 @@ function describeResponseFiles(prefix, objects) {
     .filter((key) => typeof key === 'string');
   const processingKey = `${prefix}${STATUS_PROCESSING_KEY}`;
   const completedKeys = keys.filter((key) => key !== processingKey);
-  const transcriptKey =
-    completedKeys.find((key) => key.toLowerCase().endsWith(TRANSCRIPT_RESPONSE_EXTENSION)) ?? null;
-  const audioKey =
-    completedKeys.find((key) => key.toLowerCase().endsWith(AUDIO_RESPONSE_EXTENSION)) ?? null;
+  const responseGroups = new Map();
+
+  for (const key of completedKeys) {
+    const responseFile = describeResponseFile(prefix, key);
+
+    if (!responseFile) {
+      continue;
+    }
+
+    const responseGroup = responseGroups.get(responseFile.responseId) ?? {
+      audioKey: null,
+      responseId: responseFile.responseId,
+      transcriptKey: null,
+    };
+
+    if (responseFile.kind === 'audio') {
+      responseGroup.audioKey = key;
+    } else {
+      responseGroup.transcriptKey = key;
+    }
+
+    responseGroups.set(responseFile.responseId, responseGroup);
+  }
+
+  const latestResponse =
+    Array.from(responseGroups.values()).sort(compareResponseGroupsDescending)[0] ?? null;
   const hasCompleteObject = completedKeys.length > 0;
   const status = hasCompleteObject ? 'complete' : keys.includes(processingKey) ? 'processing' : 'pending';
 
   return {
-    audioKey,
+    audioKey: latestResponse?.audioKey ?? null,
+    responseId: latestResponse?.responseId ?? null,
     status,
-    transcriptKey,
+    transcriptKey: latestResponse?.transcriptKey ?? null,
   };
+}
+
+function describeResponseFile(prefix, key) {
+  if (!key.startsWith(prefix)) {
+    return null;
+  }
+
+  const responseKey = key.slice(prefix.length);
+  const normalizedKey = responseKey.toLowerCase();
+  const extension = normalizedKey.endsWith(AUDIO_RESPONSE_EXTENSION)
+    ? AUDIO_RESPONSE_EXTENSION
+    : normalizedKey.endsWith(TRANSCRIPT_RESPONSE_EXTENSION)
+      ? TRANSCRIPT_RESPONSE_EXTENSION
+      : null;
+
+  if (!extension) {
+    return null;
+  }
+
+  return {
+    kind: extension === AUDIO_RESPONSE_EXTENSION ? 'audio' : 'transcript',
+    responseId: responseKey.slice(0, -extension.length),
+  };
+}
+
+function compareResponseGroupsDescending(left, right) {
+  return compareResponseIds(right.responseId, left.responseId);
+}
+
+function compareResponseIds(left, right) {
+  const leftTimestamp = parseResponseTimestamp(left);
+  const rightTimestamp = parseResponseTimestamp(right);
+
+  if (leftTimestamp !== null || rightTimestamp !== null) {
+    if (leftTimestamp === null) {
+      return -1;
+    }
+
+    if (rightTimestamp === null) {
+      return 1;
+    }
+
+    if (leftTimestamp !== rightTimestamp) {
+      return leftTimestamp - rightTimestamp;
+    }
+  }
+
+  return left.localeCompare(right);
+}
+
+function parseResponseTimestamp(responseId) {
+  const match = /^(\d+)-response$/u.exec(responseId);
+
+  if (!match) {
+    return null;
+  }
+
+  const timestamp = Number.parseInt(match[1], 10);
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 async function readJson(request) {

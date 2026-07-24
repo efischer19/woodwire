@@ -1061,7 +1061,11 @@ async function appendAssistantReply(conversation, elements) {
   }
 
   const payload = await response.json();
-  if (!payload.responseId || payload.responseId === conversation.responseId) {
+  if (!payload.responseId) {
+    return null;
+  }
+
+  if (payload.responseId === conversation.responseId) {
     return null;
   }
 

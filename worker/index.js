@@ -578,10 +578,10 @@ function describeResponseFile(prefix, key) {
 }
 
 function compareResponseGroupsDescending(left, right) {
-  return compareResponseIds(right.responseId, left.responseId);
+  return compareResponseIdsForSort(right.responseId, left.responseId);
 }
 
-function compareResponseIds(left, right) {
+function compareResponseIdsForSort(left, right) {
   const leftTimestamp = parseResponseTimestamp(left);
   const rightTimestamp = parseResponseTimestamp(right);
 

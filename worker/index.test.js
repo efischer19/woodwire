@@ -450,6 +450,7 @@ describe('Woodwire Worker', () => {
       conversationId: 'conversation-123',
       hasAudio: false,
       hasTranscript: true,
+      latestResponseId: 'response',
       status: 'complete',
     });
     expect(firstResponse.headers.get('CDN-Cache-Control')).toBe('max-age=3');
@@ -459,6 +460,7 @@ describe('Woodwire Worker', () => {
       conversationId: 'conversation-123',
       hasAudio: false,
       hasTranscript: true,
+      latestResponseId: 'response',
       status: 'complete',
     });
     expect(fetchS3List).toHaveBeenCalledTimes(1);
@@ -490,7 +492,39 @@ describe('Woodwire Worker', () => {
       conversationId: 'conversation-999',
       hasAudio: false,
       hasTranscript: false,
+      latestResponseId: null,
       status: 'processing',
+    });
+  });
+
+  test('reports the latest response ID when a conversation has multiple replies', async () => {
+    const worker = createWorker({
+      createAwsClient: () => ({}),
+      fetchS3List: vi.fn().mockResolvedValue(
+        new Response(
+          '<ListBucketResult><Contents><Key>outbox/conversation-123/response.md</Key></Contents><Contents><Key>outbox/conversation-123/1719758400000-response.md</Key></Contents></ListBucketResult>',
+          { status: 200 },
+        ),
+      ),
+    });
+
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/status/conversation-123', {
+        headers: { 'X-Woodwire-Auth': baseEnv.WOODWIRE_AUTH },
+        method: 'GET',
+      }),
+      baseEnv,
+      {},
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      cacheTtlSeconds: 3,
+      conversationId: 'conversation-123',
+      hasAudio: false,
+      hasTranscript: true,
+      latestResponseId: '1719758400000-response',
+      status: 'complete',
     });
   });
 
@@ -700,6 +734,7 @@ describe('Woodwire Worker', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       audioUrl: 'https://downloads.example.com/presigned-audio',
+      responseId: '1719758400000-response',
       transcriptUrl: 'https://downloads.example.com/presigned-transcript',
     });
     expect(fetchS3List).toHaveBeenCalledTimes(1);
@@ -746,6 +781,7 @@ describe('Woodwire Worker', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       audioUrl: null,
+      responseId: '1719758400000-response',
       transcriptUrl: 'https://downloads.example.com/presigned-transcript',
     });
   });
@@ -778,8 +814,51 @@ describe('Woodwire Worker', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       audioUrl: 'https://downloads.example.com/presigned-audio',
+      responseId: '1719758400000-response',
       transcriptUrl: null,
     });
+  });
+
+  test('returns the newest response assets when a conversation has multiple replies', async () => {
+    const signS3Request = vi
+      .fn()
+      .mockResolvedValueOnce({ url: 'https://downloads.example.com/presigned-latest-audio' })
+      .mockResolvedValueOnce({ url: 'https://downloads.example.com/presigned-latest-transcript' });
+    const fetchS3List = vi.fn().mockResolvedValue(
+      new Response(
+        '<ListBucketResult><Contents><Key>outbox/conversation-123/response.md</Key></Contents><Contents><Key>outbox/conversation-123/1719758400000-response.md</Key></Contents><Contents><Key>outbox/conversation-123/1719758400000-response.mp3</Key></Contents></ListBucketResult>',
+        { status: 200 },
+      ),
+    );
+    const worker = createWorker({
+      createAwsClient: () => ({}),
+      fetchS3List,
+      signS3Request,
+    });
+
+    const response = await worker.fetch(
+      new Request('https://worker.example.com/api/response/conversation-123', {
+        headers: {
+          'X-Woodwire-Auth': baseEnv.WOODWIRE_AUTH,
+        },
+        method: 'GET',
+      }),
+      baseEnv,
+      {},
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      audioUrl: 'https://downloads.example.com/presigned-latest-audio',
+      responseId: '1719758400000-response',
+      transcriptUrl: 'https://downloads.example.com/presigned-latest-transcript',
+    });
+    expect(signS3Request.mock.calls[0][1]).toBe(
+      'https://woodwire-chat.s3.amazonaws.com/outbox/conversation-123/1719758400000-response.mp3',
+    );
+    expect(signS3Request.mock.calls[1][1]).toBe(
+      'https://woodwire-chat.s3.amazonaws.com/outbox/conversation-123/1719758400000-response.md',
+    );
   });
 
   test('rejects browser requests from non-PWA origins', async () => {

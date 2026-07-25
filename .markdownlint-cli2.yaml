@@ -17,5 +17,5 @@ config:
   MD024:
     siblings_only: true
 
-  # Allow inline HTML for PWA icon display in README
+  # Allow inline HTML — needed for PWA icon and other formatted content
   MD033: false

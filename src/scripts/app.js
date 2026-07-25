@@ -76,8 +76,6 @@ function initChatApp() {
   hydrateSetupForm(elements);
   initializeVoiceMemo(elements, state);
   hydrateConversationState(state);
-  renderStoredMessages(elements);
-  renderQueuedMessages(elements);
   renderPendingAttachments(elements, state);
   renderConversationList(elements, state);
   syncVisibleConversation(elements, state.activeConversationId);
@@ -868,7 +866,7 @@ async function sendMessage(message, elements, state) {
     trackPendingConversation(state, {
       conversationId: payload.conversationId,
       localId: message.localId,
-      responseId: getLatestConversationResponseId(elements, payload.conversationId),
+      responseId: getLatestConversationResponseId(payload.conversationId),
       startedAt: Date.now(),
     });
     renderConversationList(elements, state);
@@ -1069,7 +1067,11 @@ async function appendAssistantReply(conversation, elements) {
     return null;
   }
 
-  if (elements.messageHistory.querySelector(`[data-response-id="${payload.responseId}"]`)) {
+  if (
+    getStoredMessages().some(
+      (message) => message?.role === "ai" && message.id === payload.responseId,
+    )
+  ) {
     return payload.responseId;
   }
 
@@ -1178,14 +1180,18 @@ function renderQueuedMessages(elements) {
   }
 }
 
-function renderStoredMessages(elements) {
-  const history = getStoredMessages();
+function renderStoredMessages(elements, activeConversationId = getActiveConversationId()) {
+  const history = getStoredMessages().filter((message) =>
+    conversationIdsMatch(message?.conversationId, activeConversationId),
+  );
+
+  elements.messageHistory.replaceChildren();
 
   if (!history.length) {
+    elements.messageHistory.append(createWelcomeMessage());
+    elements.messageHistory.scrollTop = elements.messageHistory.scrollHeight;
     return;
   }
-
-  elements.messageHistory.innerHTML = "";
 
   for (const message of history) {
     appendMessage(
@@ -1215,6 +1221,14 @@ function renderStoredMessages(elements) {
 }
 
 function appendMessage(elements, message, options = {}) {
+  if (options.persist !== false) {
+    upsertStoredMessage(message);
+  }
+
+  if (!conversationIdsMatch(message.conversationId, getActiveConversationId())) {
+    return;
+  }
+
   const article = document.createElement("article");
   article.className = `message message-${message.variant}`;
 
@@ -1267,15 +1281,11 @@ function appendMessage(elements, message, options = {}) {
 
   article.append(body, meta);
   elements.messageHistory.append(article);
-  applyConversationVisibility(article, getActiveConversationId());
   elements.messageHistory.scrollTop = elements.messageHistory.scrollHeight;
-
-  if (options.persist !== false) {
-    upsertStoredMessage(message);
-  }
 }
 
 function updateMessageStatus(elements, localId, statusText, isError) {
+  updateStoredMessageStatus(localId, statusText);
   const message = elements.messageHistory.querySelector(`[data-local-id="${localId}"]`);
   if (!message) {
     return;
@@ -1285,10 +1295,8 @@ function updateMessageStatus(elements, localId, statusText, isError) {
   if (!status) {
     return;
   }
-
   status.textContent = statusText;
   status.classList.toggle("is-error", isError);
-  updateStoredMessageStatus(localId, statusText);
 }
 
 function updateQueueStatus(elements) {
@@ -2075,18 +2083,16 @@ function getPendingConversations() {
   return getStorageJson(STORAGE_KEYS.pendingConversations, []);
 }
 
-function getLatestConversationResponseId(elements, conversationId) {
+function getLatestConversationResponseId(conversationId) {
   if (!conversationId) {
     return null;
   }
 
-  const assistantReplies = Array.from(
-    elements.messageHistory.querySelectorAll(
-      `[data-conversation-id="${conversationId}"][data-response-id]`,
-    ),
+  const assistantReplies = getStoredMessages().filter(
+    (message) => message?.role === "ai" && conversationIdsMatch(message.conversationId, conversationId),
   );
 
-  return assistantReplies.at(-1)?.dataset.responseId || null;
+  return assistantReplies.at(-1)?.id || null;
 }
 
 function hasPendingConversationResponse(conversation, payload) {
@@ -2250,23 +2256,40 @@ function buildConversationDisplayName(seedText, fallbackIndex) {
   return `Conversation ${fallbackIndex}`;
 }
 
-function applyConversationVisibility(messageElement, activeConversationId) {
-  if (!messageElement) {
-    return;
-  }
+function createWelcomeMessage() {
+  const article = document.createElement("article");
+  article.className = "message message-assistant";
 
-  const messageConversationId = messageElement.dataset.conversationId || null;
-  const normalizedActiveConversationId = activeConversationId || null;
-  messageElement.hidden =
-    normalizedActiveConversationId === null
-      ? messageConversationId !== null
-      : messageConversationId !== normalizedActiveConversationId;
+  const body = document.createElement("div");
+  body.className = "message-body";
+
+  const text = document.createElement("p");
+  text.textContent =
+    "Hello. Save your Worker connection details, then send a message to start chatting with your local AI bot.";
+  body.append(text);
+
+  const meta = document.createElement("p");
+  meta.className = "message-meta";
+
+  const author = document.createElement("span");
+  author.textContent = "Woodwire";
+  meta.append(author);
+
+  const time = document.createElement("time");
+  time.dateTime = "2026-06-30T13:08:55.701Z";
+  time.textContent = "Just now";
+  meta.append(time);
+
+  article.append(body, meta);
+  return article;
+}
+
+function conversationIdsMatch(conversationId, activeConversationId) {
+  return (conversationId || null) === (activeConversationId || null);
 }
 
 function syncVisibleConversation(elements, activeConversationId) {
-  for (const messageElement of elements.messageHistory.querySelectorAll(".message")) {
-    applyConversationVisibility(messageElement, activeConversationId);
-  }
+  renderStoredMessages(elements, activeConversationId);
 }
 
 function assignConversationIdToMessage(localId, conversationId, elements) {

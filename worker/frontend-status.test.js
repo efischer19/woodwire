@@ -50,6 +50,11 @@ class FakeElement {
     this.scrollTop = this.scrollHeight;
   }
 
+  replaceChildren(...nodes) {
+    this.children = [];
+    this.append(...nodes);
+  }
+
   querySelector(selector) {
     return this.querySelectorAll(selector)[0] ?? null;
   }
@@ -200,6 +205,7 @@ globalThis.__appExports = {
   appendMessage,
   getStoredMessages,
   pollConversation,
+  syncVisibleConversation,
   trackPendingConversation,
   STORAGE_KEYS,
 };`,
@@ -214,6 +220,93 @@ globalThis.__appExports = {
 }
 
 describe('frontend threaded status handling', () => {
+  test('re-renders only the selected conversation when switching threads', () => {
+    const { exports, localStorage } = loadApp(vi.fn());
+    localStorage.setItem(exports.STORAGE_KEYS.activeConversationId, 'conversation-a');
+
+    const elements = {
+      messageHistory: new FakeElement('section'),
+      screenReaderStatus: new FakeElement('div'),
+    };
+
+    exports.appendMessage(elements, {
+      author: 'You',
+      conversationId: 'conversation-a',
+      localId: 'user-a',
+      status: 'Reply received',
+      text: 'Thread A',
+      timestamp: '2026-07-24T11:00:00.000Z',
+      variant: 'user',
+    });
+    exports.appendMessage(elements, {
+      author: 'AI',
+      conversationId: 'conversation-a',
+      responseFor: 'user-a',
+      responseId: 'response-a',
+      text: 'Reply A',
+      timestamp: '2026-07-24T11:00:05.000Z',
+      variant: 'assistant',
+    });
+    exports.appendMessage(elements, {
+      author: 'You',
+      conversationId: 'conversation-b',
+      localId: 'user-b',
+      status: 'Reply received',
+      text: 'Thread B',
+      timestamp: '2026-07-24T11:01:00.000Z',
+      variant: 'user',
+    });
+    exports.appendMessage(elements, {
+      author: 'AI',
+      conversationId: 'conversation-b',
+      responseFor: 'user-b',
+      responseId: 'response-b',
+      text: 'Reply B',
+      timestamp: '2026-07-24T11:01:05.000Z',
+      variant: 'assistant',
+    });
+
+    expect(elements.messageHistory.querySelectorAll('.message').length).toBe(2);
+    expect(elements.messageHistory.querySelectorAll('[data-conversation-id="conversation-a"]').length).toBe(2);
+
+    localStorage.setItem(exports.STORAGE_KEYS.activeConversationId, 'conversation-b');
+    exports.syncVisibleConversation(elements, 'conversation-b');
+
+    expect(elements.messageHistory.querySelectorAll('.message').length).toBe(2);
+    expect(elements.messageHistory.querySelectorAll('[data-conversation-id="conversation-a"]').length).toBe(0);
+    expect(elements.messageHistory.querySelectorAll('[data-conversation-id="conversation-b"]').length).toBe(2);
+  });
+
+  test('shows only the welcome message for an empty selected conversation', () => {
+    const { exports, localStorage } = loadApp(vi.fn());
+    localStorage.setItem(exports.STORAGE_KEYS.activeConversationId, 'conversation-a');
+
+    const elements = {
+      messageHistory: new FakeElement('section'),
+      screenReaderStatus: new FakeElement('div'),
+    };
+
+    exports.appendMessage(elements, {
+      author: 'You',
+      conversationId: 'conversation-a',
+      localId: 'user-a',
+      status: 'Reply received',
+      text: 'Thread A',
+      timestamp: '2026-07-24T11:00:00.000Z',
+      variant: 'user',
+    });
+
+    localStorage.setItem(exports.STORAGE_KEYS.activeConversationId, 'conversation-empty');
+    exports.syncVisibleConversation(elements, 'conversation-empty');
+
+    expect(elements.messageHistory.querySelectorAll('.message').length).toBe(1);
+    expect(elements.messageHistory.querySelectorAll('.message-assistant').length).toBe(1);
+    expect(elements.messageHistory.querySelectorAll('[data-conversation-id]').length).toBe(0);
+    expect(elements.messageHistory.children[0].children[0].children[0].textContent).toContain(
+      'Hello. Save your Worker connection details',
+    );
+  });
+
   test('keeps a follow-up message pending until a newer response is available', async () => {
     const fetch = vi
       .fn()
@@ -270,6 +363,7 @@ describe('frontend threaded status handling', () => {
     const { exports, localStorage } = loadApp(fetch);
     localStorage.setItem(exports.STORAGE_KEYS.auth, 'test-auth');
     localStorage.setItem(exports.STORAGE_KEYS.apiBase, 'https://worker.example.com');
+    localStorage.setItem(exports.STORAGE_KEYS.activeConversationId, 'conversation-123');
 
     const elements = {
       messageHistory: new FakeElement('section'),

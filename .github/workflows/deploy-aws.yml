@@ -71,6 +71,7 @@ jobs:
           echo "🔄 Purging Cloudflare cache for zone: $CF_ZONE_ID"
 
           response_file=$(mktemp)
+          trap 'rm -f "$response_file"' EXIT
           http_status=$(curl \
             --silent \
             --show-error \
@@ -88,7 +89,17 @@ jobs:
 
           http_status = int(sys.argv[1])
           response_path = pathlib.Path(sys.argv[2])
-          payload = json.loads(response_path.read_text())
+          raw_response = response_path.read_text()
+
+          try:
+              payload = json.loads(raw_response)
+          except json.JSONDecodeError:
+              print(
+                  f"Cloudflare cache purge failed (invalid JSON response, status={http_status}).",
+                  file=sys.stderr,
+              )
+              print(raw_response, file=sys.stderr)
+              sys.exit(1)
 
           if http_status >= 400 or not payload.get("success"):
               failure_kind = "HTTP error" if http_status >= 400 else "Cloudflare API error"

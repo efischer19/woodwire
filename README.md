@@ -21,7 +21,7 @@ While Woodwire supports multiple AI backends (OpenClaw, Ollama, or mock), it's d
 - **Zero-Trust Gateway** — Cloudflare Worker validates every request with a shared passphrase
 - **Multimodal** — Text, images, audio attachments; automatic voice transcription and synthesis
 - **Outbound-Only Bot** — Local bot never exposes ports; all communication is pull-based via SQS + S3
-- **No Build Required** — Frontend is vanilla HTML/CSS/JS; deploy directly to S3/CloudFront or GitHub Pages
+- **No Build Required** — Frontend is vanilla HTML/CSS/JS; deploy directly to S3/Cloudflare or GitHub Pages
 - **Infrastructure as Code** — CloudFormation templates for reproducible AWS deployments
 
 ## Architecture Overview
@@ -66,7 +66,7 @@ Woodwire follows the monorepo layout defined in [ADR-006](./meta/adr/ADR-006-mon
 
 ```text
 woodwire/
-├── src/              # PWA frontend (HTML/CSS/JS) → deploys to S3/CloudFront
+├── src/              # PWA frontend (HTML/CSS/JS) → deploys to S3/Cloudflare
 ├── bot/              # Local Python bot (SQS poller, LLM orchestrator)
 ├── worker/           # Cloudflare Worker source (zero-trust gateway)
 ├── infra/            # AWS CloudFormation templates (IaC)

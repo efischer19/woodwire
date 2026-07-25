@@ -58,7 +58,7 @@ Save the `ChatQueueUrl`, `ChatQueueArn`, and `ChatDeadLetterQueueArn` outputs.
 
 ### 1.3 Provision IAM Roles and GitHub Actions Permissions (Optional)
 
-If you want to deploy the app from GitHub Actions to AWS S3 + CloudFront:
+If you want to deploy the app from GitHub Actions to AWS S3 and purge the Cloudflare cache:
 
 ```bash
 aws cloudformation deploy \
@@ -71,7 +71,6 @@ aws cloudformation deploy \
     ChatBucketName=<YOUR_CHAT_BUCKET_NAME> \
     ChatQueueArn=<YOUR_CHAT_QUEUE_ARN> \
     PwaHostingBucketName=woodwire-pwa \
-    CloudFrontDistributionId=<YOUR_CLOUDFRONT_DISTRIBUTION_ID> \
     GitHubRepositoryOwner=<YOUR_GITHUB_USERNAME> \
     GitHubRepositoryName=woodwire \
     GitHubOidcProviderArn=<YOUR_GITHUB_OIDC_PROVIDER_ARN> \
@@ -184,20 +183,24 @@ aws s3 sync src/ s3://woodwire-pwa/ \
   --delete \
   --cache-control "public, max-age=3600"
 
-# Invalidate CloudFront cache (if using CloudFront)
-aws cloudfront create-invalidation \
-  --distribution-id E1ABCDEF2GHIJK \
-  --paths "/*"
+# Purge the Cloudflare edge cache
+curl -X POST "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
+  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+  -H "Content-Type: application/json" \
+  --data '{"purge_everything": true}'
 ```
 
 ### 4.2 Option B: GitHub Actions Deployment
 
 1. Provision the IAM resources (Step 1.3 above)
-2. Add repository variables in **Settings → Secrets and variables → Actions → Variables**:
-   - `AWS_ROLE_ARN`: Your GitHub Actions IAM role
-   - `AWS_REGION`: `us-east-1`
-   - `S3_BUCKET_NAME`: Your PWA hosting bucket name
-   - `CLOUDFRONT_DISTRIBUTION_ID`: Your CloudFront distribution ID
+2. Add repository configuration in **Settings → Secrets and variables → Actions**:
+   - **Variables**
+     - `AWS_ROLE_ARN`: Your GitHub Actions IAM role
+     - `AWS_REGION`: `us-east-1`
+     - `S3_BUCKET_NAME`: Your PWA hosting bucket name
+   - **Secrets**
+     - `CLOUDFLARE_ZONE_ID`: Your Cloudflare zone ID
+     - `CLOUDFLARE_API_TOKEN`: A Cloudflare API token with cache purge access for that zone
 3. Push to `main` to trigger automatic deployment, or run the workflow manually
 
 See [src/README.md](./src/README.md) for development details.

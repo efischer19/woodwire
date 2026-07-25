@@ -1,4 +1,4 @@
-name: Deploy to AWS (S3 + CloudFront)
+name: Deploy to AWS (S3 + Cloudflare Purge)
 
 on:
   push:
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy to S3 and invalidate CloudFront
+    name: Deploy to S3 and purge Cloudflare cache
     runs-on: ubuntu-latest
 
     steps:
@@ -54,17 +54,38 @@ jobs:
 
           echo "✅ Site synced successfully"
 
-      #- name: Invalidate CloudFront cache
-      #  run: |
-      #    echo "🔄 Creating CloudFront invalidation for distribution: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}"
+      - name: Verify Cloudflare purge credentials
+        env:
+          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CF_ZONE_ID" ] || [ -z "$CF_API_TOKEN" ]; then
+            echo "❌ Missing required Cloudflare credentials: CLOUDFLARE_ZONE_ID and/or CLOUDFLARE_API_TOKEN"
+            exit 1
+          fi
 
-      #    INVALIDATION_ID=$(aws cloudfront create-invalidation \
-      #      --distribution-id "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}" \
-      #      --paths "/*" \
-      #      --query 'Invalidation.Id' \
-      #      --output text)
+      - name: Purge Cloudflare cache
+        env:
+          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "🔄 Purging Cloudflare cache for zone: $CF_ZONE_ID"
 
-      #    echo "✅ Invalidation created: $INVALIDATION_ID"
+          response_file=$(mktemp)
+          chmod 600 "$response_file"
+          trap 'rm -f "$response_file"' EXIT
+          http_status=$(curl \
+            --silent \
+            --show-error \
+            --output "$response_file" \
+            --write-out "%{http_code}" \
+            --request POST "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/purge_cache" \
+            --header "Authorization: Bearer ${CF_API_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data '{"purge_everything": true}')
+
+          python .github/scripts/validate_cloudflare_purge.py "$http_status" "$response_file"
 
       - name: Deployment summary
         if: always()

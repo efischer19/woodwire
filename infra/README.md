@@ -110,7 +110,7 @@ Least-privilege IAM users and GitHub Actions OIDC role for secure deployments.
 
 - **LocalBotUser** — IAM user for the local bot (SQS receive/delete, S3 read/write)
 - **CloudflareWorkerUser** — IAM user for the Worker (SQS send, S3 pre-signed URL generation)
-- **GitHubActionsRole** — OIDC role for GitHub Actions CI/CD (S3 sync, CloudFront invalidation)
+- **GitHubActionsRole** — OIDC role for GitHub Actions CI/CD (S3 sync for the frontend deployment workflow)
 - **Billing Alarm** — Monitors AWS estimated charges in us-east-1
 
 ### Parameters
@@ -121,7 +121,6 @@ Least-privilege IAM users and GitHub Actions OIDC role for secure deployments.
 | `ChatBucketName` | Yes | — | Private S3 bucket name (from Chat Bucket stack) |
 | `ChatQueueArn` | Yes | — | SQS queue ARN (from Chat Queue stack) |
 | `PwaHostingBucketName` | Yes | — | S3 bucket name for PWA static files |
-| `CloudFrontDistributionId` | Yes | — | CloudFront distribution ID for cache invalidation |
 | `GitHubRepositoryOwner` | Yes | — | Your GitHub username or organization |
 | `GitHubRepositoryName` | Yes | — | Repository name (e.g., `woodwire`) |
 | `GitHubBranchName` | No | `main` | Branch allowed to deploy via OIDC |
@@ -141,7 +140,6 @@ aws cloudformation deploy \
     ChatBucketName=woodwire-chat-bucket-your-org-id \
     ChatQueueArn=arn:aws:sqs:us-east-1:123456789012:woodwire-chat \
     PwaHostingBucketName=woodwire-pwa \
-    CloudFrontDistributionId=E1ABCDEF2GHIJK \
     GitHubRepositoryOwner=YOUR_GITHUB_USERNAME \
     GitHubRepositoryName=woodwire \
     GitHubOidcProviderArn=arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com \
@@ -199,7 +197,9 @@ Store these credentials as [Cloudflare Worker secrets](../worker/README.md).
      - `AWS_ROLE_ARN`: Paste the role ARN
      - `AWS_REGION`: `us-east-1` (or your region)
      - `S3_BUCKET_NAME`: `woodwire-pwa` (or your PWA hosting bucket)
-     - `CLOUDFRONT_DISTRIBUTION_ID`: Your CloudFront distribution ID
+   - **Settings → Secrets and variables → Actions → Secrets**
+     - `CLOUDFLARE_ZONE_ID`: Your Cloudflare zone ID
+     - `CLOUDFLARE_API_TOKEN`: A Cloudflare API token with cache purge access for that zone
 4. Commit and push to `main` to trigger deployment
 
 See [QUICK_START.md](../QUICK_START.md) for the full setup guide.

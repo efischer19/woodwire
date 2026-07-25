@@ -20,10 +20,6 @@ Parameters:
   PwaHostingBucketName:
     Type: String
     Description: Name of the S3 bucket that hosts the static PWA.
-  CloudFrontDistributionId:
-    Type: String
-    AllowedPattern: '^[A-Z0-9]+$'
-    Description: CloudFront distribution ID used by the GitHub Actions deployment workflow.
   GitHubRepositoryOwner:
     Type: String
     Description: GitHub repository owner allowed to assume the deployment role.
@@ -198,12 +194,6 @@ Resources:
               - s3:DeleteObject
             Resource:
               Fn::Sub: 'arn:${AWS::Partition}:s3:::${PwaHostingBucketName}/*'
-          - Sid: AllowCloudFrontInvalidation
-            Effect: Allow
-            Action:
-              - cloudfront:CreateInvalidation
-            Resource:
-              Fn::Sub: 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistributionId}'
           - Sid: DenyAnyOtherPwaBucketListAction
             Effect: Deny
             NotAction:
@@ -217,12 +207,6 @@ Resources:
               - s3:DeleteObject
             Resource:
               Fn::Sub: 'arn:${AWS::Partition}:s3:::${PwaHostingBucketName}/*'
-          - Sid: DenyAnyOtherCloudFrontAction
-            Effect: Deny
-            NotAction:
-              - cloudfront:CreateInvalidation
-            Resource:
-              Fn::Sub: 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistributionId}'
 
   BillingAlarm:
     Type: AWS::CloudWatch::Alarm

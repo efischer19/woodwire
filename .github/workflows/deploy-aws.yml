@@ -1,4 +1,4 @@
-name: Deploy to AWS (S3 + CloudFront)
+name: Deploy to AWS (S3 + Cloudflare Purge)
 
 on:
   push:
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy to S3 and invalidate CloudFront
+    name: Deploy to S3 and purge Cloudflare cache
     runs-on: ubuntu-latest
 
     steps:
@@ -54,17 +54,49 @@ jobs:
 
           echo "✅ Site synced successfully"
 
-      #- name: Invalidate CloudFront cache
-      #  run: |
-      #    echo "🔄 Creating CloudFront invalidation for distribution: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}"
+      - name: Verify Cloudflare purge credentials
+        env:
+          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          test -n "$CF_ZONE_ID" || { echo "❌ CLOUDFLARE_ZONE_ID secret is required"; exit 1; }
+          test -n "$CF_API_TOKEN" || { echo "❌ CLOUDFLARE_API_TOKEN secret is required"; exit 1; }
 
-      #    INVALIDATION_ID=$(aws cloudfront create-invalidation \
-      #      --distribution-id "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}" \
-      #      --paths "/*" \
-      #      --query 'Invalidation.Id' \
-      #      --output text)
+      - name: Purge Cloudflare cache
+        env:
+          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "🔄 Purging Cloudflare cache for zone: $CF_ZONE_ID"
 
-      #    echo "✅ Invalidation created: $INVALIDATION_ID"
+          response_file=$(mktemp)
+          http_status=$(curl \
+            --silent \
+            --show-error \
+            --output "$response_file" \
+            --write-out "%{http_code}" \
+            -X POST "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/purge_cache" \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data '{"purge_everything": true}')
+
+          python - "$http_status" "$response_file" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          http_status = int(sys.argv[1])
+          response_path = pathlib.Path(sys.argv[2])
+          payload = json.loads(response_path.read_text())
+
+          if http_status >= 400 or not payload.get("success"):
+              print("Cloudflare cache purge failed.", file=sys.stderr)
+              print(json.dumps(payload, indent=2), file=sys.stderr)
+              sys.exit(1)
+
+          print("✅ Cloudflare cache purged successfully")
+          PY
 
       - name: Deployment summary
         if: always()

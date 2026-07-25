@@ -76,9 +76,9 @@ jobs:
             --show-error \
             --output "$response_file" \
             --write-out "%{http_code}" \
-            -X POST "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/purge_cache" \
-            -H "Authorization: Bearer ${CF_API_TOKEN}" \
-            -H "Content-Type: application/json" \
+            --request POST "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/purge_cache" \
+            --header "Authorization: Bearer ${CF_API_TOKEN}" \
+            --header "Content-Type: application/json" \
             --data '{"purge_everything": true}')
 
           python - "$http_status" "$response_file" <<'PY'
@@ -91,7 +91,11 @@ jobs:
           payload = json.loads(response_path.read_text())
 
           if http_status >= 400 or not payload.get("success"):
-              print("Cloudflare cache purge failed.", file=sys.stderr)
+              failure_kind = "HTTP error" if http_status >= 400 else "Cloudflare API error"
+              print(
+                  f"Cloudflare cache purge failed ({failure_kind}, status={http_status}).",
+                  file=sys.stderr,
+              )
               print(json.dumps(payload, indent=2), file=sys.stderr)
               sys.exit(1)
 

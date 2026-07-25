@@ -17,5 +17,5 @@ config:
   MD024:
     siblings_only: true
 
-  # Allow inline HTML — needed for PWA icon and other formatted content
+  # Allow inline HTML — needed for centered logo display in README.md
   MD033: false

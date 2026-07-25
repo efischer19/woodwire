@@ -16,7 +16,6 @@ class FakeElement {
   constructor(tagName = 'div') {
     this.tagName = tagName.toUpperCase();
     this.attributes = new Map();
-    this._hidden = false;
     this.children = [];
     this.className = '';
     this.dataset = {};
@@ -88,13 +87,11 @@ class FakeElement {
   }
 
   get hidden() {
-    return this._hidden;
+    return this.attributes.has('hidden');
   }
 
   set hidden(value) {
-    this._hidden = Boolean(value);
-
-    if (this._hidden) {
+    if (value) {
       this.attributes.set('hidden', '');
       return;
     }
@@ -112,16 +109,11 @@ class FakeElement {
 
   removeAttribute(name) {
     this.attributes.delete(name);
-
-    if (name === 'hidden') {
-      this._hidden = false;
-    }
   }
 
   setAttribute(name, value) {
     if (name === 'hidden') {
       this.attributes.set(name, String(value));
-      this._hidden = true;
       return;
     }
 
@@ -376,7 +368,7 @@ describe('frontend threaded status handling', () => {
     );
   });
 
-  test('uses the hidden attribute for composer drawer visibility', () => {
+  test('starts the composer drawer hidden and shows it when expanded', () => {
     const { exports } = loadApp(vi.fn());
     const elements = {
       attachmentButton: new FakeElement('button'),

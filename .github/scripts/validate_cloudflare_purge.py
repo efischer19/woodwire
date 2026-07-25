@@ -18,8 +18,8 @@ def main() -> int:
         print(raw_response, file=sys.stderr)
         return 1
 
-    if http_status < 200 or http_status >= 400 or not payload.get("success"):
-        failure_kind = "HTTP error" if http_status < 200 or http_status >= 400 else "Cloudflare API error"
+    if not (200 <= http_status < 400) or not payload.get("success"):
+        failure_kind = "HTTP error" if not (200 <= http_status < 400) else "Cloudflare API error"
         print(
             f"Cloudflare cache purge failed ({failure_kind}, status={http_status}).",
             file=sys.stderr,
@@ -31,4 +31,5 @@ def main() -> int:
     return 0
 
 
-raise SystemExit(main())
+if __name__ == "__main__":
+    raise SystemExit(main())

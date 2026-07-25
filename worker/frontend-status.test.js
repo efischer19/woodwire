@@ -88,6 +88,10 @@ class FakeElement {
   }
 
   getAttribute(name) {
+    if (name === 'hidden' && this.hidden) {
+      return '';
+    }
+
     return this.attributes.get(name) ?? null;
   }
 
@@ -96,10 +100,20 @@ class FakeElement {
   }
 
   removeAttribute(name) {
+    if (name === 'hidden') {
+      this.hidden = false;
+    }
+
     this.attributes.delete(name);
   }
 
   setAttribute(name, value) {
+    if (name === 'hidden') {
+      this.hidden = true;
+      this.attributes.set(name, '');
+      return;
+    }
+
     this.attributes.set(name, String(value));
   }
 }
@@ -343,7 +357,6 @@ describe('frontend threaded status handling', () => {
 
     elements.composerDrawer.className = 'composer-drawer';
     elements.composerDrawer.hidden = true;
-    elements.attachmentToggleBadge.className = 'composer-toggle-badge is-hidden';
 
     exports.renderComposerDrawer(elements, state);
 

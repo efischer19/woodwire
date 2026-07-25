@@ -16,10 +16,10 @@ class FakeElement {
   constructor(tagName = 'div') {
     this.tagName = tagName.toUpperCase();
     this.attributes = new Map();
+    this._hidden = false;
     this.children = [];
     this.className = '';
     this.dataset = {};
-    this.hidden = false;
     this.parentNode = null;
     this.scrollHeight = 0;
     this.scrollTop = 0;
@@ -87,11 +87,22 @@ class FakeElement {
     }
   }
 
-  getAttribute(name) {
-    if (name === 'hidden' && this.hidden) {
-      return '';
+  get hidden() {
+    return this._hidden;
+  }
+
+  set hidden(value) {
+    this._hidden = Boolean(value);
+
+    if (this._hidden) {
+      this.attributes.set('hidden', '');
+      return;
     }
 
+    this.attributes.delete('hidden');
+  }
+
+  getAttribute(name) {
     return this.attributes.get(name) ?? null;
   }
 
@@ -101,7 +112,9 @@ class FakeElement {
 
   removeAttribute(name) {
     if (name === 'hidden') {
-      this.hidden = false;
+      this.attributes.delete(name);
+      this._hidden = false;
+      return;
     }
 
     this.attributes.delete(name);
@@ -110,7 +123,6 @@ class FakeElement {
   setAttribute(name, value) {
     if (name === 'hidden') {
       this.hidden = true;
-      this.attributes.set(name, '');
       return;
     }
 

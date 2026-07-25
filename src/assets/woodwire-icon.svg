@@ -4,12 +4,10 @@
     <clipPath id="canopy-clip">
       <circle cx="256" cy="230" r="216" />
     </clipPath>
-    
     <style>
       /* Deep Forest Slate: A rich, dark woodland charcoal-teal for the squircle backing.
          The 4 outer canvas corners outside this rounded rect remain 100% transparent! */
       .bg { fill: #1B2A24; }
-      
       /* Warm Oak Brown: A richer, slightly darker timber tone for the trunk and wires */
       .trace {
         stroke: #AD7043;
@@ -19,7 +17,6 @@
         stroke-miterlimit: 4;
         fill: none;
       }
-      
       /* Woodland Emerald: A deeper, lush leaf-green that still pops crisply */
       .node { fill: #2BA85C; }
     </style>
@@ -68,7 +65,6 @@
     <circle cx="256" cy="240" r="16.5" />
     <circle cx="166" cy="150" r="16.5" />
     <circle cx="346" cy="150" r="16.5" />
-    
     <!-- Outer and Lower Branch Nodes -->
     <circle cx="86" cy="230" r="16.5" />
     <circle cx="426" cy="230" r="16.5" />

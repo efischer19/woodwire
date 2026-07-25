@@ -73,6 +73,7 @@ jobs:
           echo "🔄 Purging Cloudflare cache for zone: $CF_ZONE_ID"
 
           response_file=$(mktemp)
+          chmod 600 "$response_file"
           trap 'rm -f "$response_file"' EXIT
           http_status=$(curl \
             --silent \
@@ -84,37 +85,7 @@ jobs:
             --header "Content-Type: application/json" \
             --data '{"purge_everything": true}')
 
-          # Validate the Cloudflare API response and surface useful failures.
-          python - "$http_status" "$response_file" <<'PY'
-          import json
-          import pathlib
-          import sys
-
-          http_status = int(sys.argv[1])
-          response_path = pathlib.Path(sys.argv[2])
-          raw_response = response_path.read_text()
-
-          try:
-              payload = json.loads(raw_response)
-          except json.JSONDecodeError:
-              print(
-                  f"Cloudflare cache purge failed (invalid JSON response, status={http_status}).",
-                  file=sys.stderr,
-              )
-              print(raw_response, file=sys.stderr)
-              sys.exit(1)
-
-          if http_status >= 400 or not payload.get("success"):
-              failure_kind = "HTTP error" if http_status >= 400 else "Cloudflare API error"
-              print(
-                  f"Cloudflare cache purge failed ({failure_kind}, status={http_status}).",
-                  file=sys.stderr,
-              )
-              print(json.dumps(payload, indent=2), file=sys.stderr)
-              sys.exit(1)
-
-          print("✅ Cloudflare cache purged successfully")
-          PY
+          python .github/scripts/validate_cloudflare_purge.py "$http_status" "$response_file"
 
       - name: Deployment summary
         if: always()

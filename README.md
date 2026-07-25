@@ -1,8 +1,4 @@
-# Woodwire
-
-<p align="center">
-  <img src="src/assets/woodwire-icon.svg" alt="Woodwire Logo" width="140" height="140" />
-</p>
+# Woodwire <img src="src/assets/woodwire-icon.svg" width="48" height="48" align="top" />
 
 > Secure, asynchronous chat between a static web app and a local AI bot.
 

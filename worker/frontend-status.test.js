@@ -263,6 +263,32 @@ globalThis.__appExports = {
 }
 
 describe('frontend threaded status handling', () => {
+  test('reflects hidden property changes through attribute helpers', () => {
+    const element = new FakeElement('section');
+
+    expect(element.hidden).toBe(false);
+    expect(element.getAttribute('hidden')).toBeNull();
+    expect(element.hasAttribute('hidden')).toBe(false);
+
+    element.hidden = true;
+
+    expect(element.hidden).toBe(true);
+    expect(element.getAttribute('hidden')).toBe('');
+    expect(element.hasAttribute('hidden')).toBe(true);
+
+    element.removeAttribute('hidden');
+
+    expect(element.hidden).toBe(false);
+    expect(element.getAttribute('hidden')).toBeNull();
+    expect(element.hasAttribute('hidden')).toBe(false);
+
+    element.setAttribute('hidden', 'until-found');
+
+    expect(element.hidden).toBe(true);
+    expect(element.getAttribute('hidden')).toBe('until-found');
+    expect(element.hasAttribute('hidden')).toBe(true);
+  });
+
   test('re-renders only the selected conversation when switching threads', () => {
     const { exports, localStorage } = loadApp(vi.fn());
     localStorage.setItem(exports.STORAGE_KEYS.activeConversationId, 'conversation-a');

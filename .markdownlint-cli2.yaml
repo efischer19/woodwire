@@ -16,3 +16,6 @@ config:
   # Allow duplicate headings in different sections (e.g., Pros/Cons)
   MD024:
     siblings_only: true
+
+  # Allow inline HTML for PWA icon display in README
+  MD033: false

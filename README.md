@@ -1,5 +1,9 @@
 # Woodwire
 
+<p align="center">
+  <img src="src/assets/woodwire-icon.svg" alt="Woodwire Logo" width="140" height="140" />
+</p>
+
 > Secure, asynchronous chat between a static web app and a local AI bot.
 
 Woodwire is an event-driven system for private, multimodal communication between a browser-based PWA and a local bot process. The frontend stays static and credential-free, while a Cloudflare Worker and AWS services coordinate message flow.

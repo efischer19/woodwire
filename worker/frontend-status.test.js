@@ -15,6 +15,7 @@ class FakeTextNode {
 class FakeElement {
   constructor(tagName = 'div') {
     this.tagName = tagName.toUpperCase();
+    this.attributes = new Map();
     this.children = [];
     this.className = '';
     this.dataset = {};
@@ -84,6 +85,22 @@ class FakeElement {
     if (value === '') {
       this.children = [];
     }
+  }
+
+  getAttribute(name) {
+    return this.attributes.get(name) ?? null;
+  }
+
+  hasAttribute(name) {
+    return this.attributes.has(name);
+  }
+
+  removeAttribute(name) {
+    this.attributes.delete(name);
+  }
+
+  setAttribute(name, value) {
+    this.attributes.set(name, String(value));
   }
 }
 
@@ -205,6 +222,7 @@ globalThis.__appExports = {
   appendMessage,
   getStoredMessages,
   pollConversation,
+  renderComposerDrawer,
   syncVisibleConversation,
   trackPendingConversation,
   STORAGE_KEYS,
@@ -305,6 +323,41 @@ describe('frontend threaded status handling', () => {
     expect(elements.messageHistory.children[0].children[0].children[0].textContent).toContain(
       'Hello. Save your Worker connection details',
     );
+  });
+
+  test('uses the hidden attribute for composer drawer visibility', () => {
+    const { exports } = loadApp(vi.fn());
+    const elements = {
+      attachmentButton: new FakeElement('button'),
+      attachmentToggleBadge: new FakeElement('span'),
+      composerDrawer: new FakeElement('section'),
+    };
+    const state = {
+      composerAttachments: [],
+      isComposerDrawerExpanded: false,
+      voiceMemo: {
+        isRecording: false,
+        previewUrl: '',
+      },
+    };
+
+    elements.composerDrawer.className = 'composer-drawer';
+    elements.composerDrawer.hidden = true;
+    elements.attachmentToggleBadge.className = 'composer-toggle-badge is-hidden';
+
+    exports.renderComposerDrawer(elements, state);
+
+    expect(elements.composerDrawer.hidden).toBe(true);
+    expect(elements.composerDrawer.className).toBe('composer-drawer');
+    expect(elements.attachmentButton.getAttribute('aria-expanded')).toBe('false');
+
+    state.isComposerDrawerExpanded = true;
+    exports.renderComposerDrawer(elements, state);
+
+    expect(elements.composerDrawer.hidden).toBe(false);
+    expect(elements.composerDrawer.className).toBe('composer-drawer');
+    expect(elements.attachmentButton.classList.contains('is-active')).toBe(true);
+    expect(elements.attachmentButton.getAttribute('aria-expanded')).toBe('true');
   });
 
   test('keeps a follow-up message pending until a newer response is available', async () => {

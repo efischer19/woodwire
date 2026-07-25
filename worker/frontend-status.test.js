@@ -111,18 +111,17 @@ class FakeElement {
   }
 
   removeAttribute(name) {
-    if (name === 'hidden') {
-      this.attributes.delete(name);
-      this._hidden = false;
-      return;
-    }
-
     this.attributes.delete(name);
+
+    if (name === 'hidden') {
+      this._hidden = false;
+    }
   }
 
   setAttribute(name, value) {
     if (name === 'hidden') {
-      this.hidden = true;
+      this.attributes.set(name, String(value));
+      this._hidden = true;
       return;
     }
 

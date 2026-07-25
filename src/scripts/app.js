@@ -781,7 +781,7 @@ function renderComposerDrawer(elements, state) {
 
   const badgeCount = getComposerDrawerBadgeCount(state);
   const isVisible = shouldShowComposerDrawer(state);
-  elements.composerDrawer.classList.toggle("is-hidden", !isVisible);
+  elements.composerDrawer.hidden = !isVisible;
   elements.attachmentButton.classList.toggle("is-active", isVisible);
   elements.attachmentButton.classList.toggle("has-pending-items", badgeCount > 0);
   elements.attachmentButton.setAttribute("aria-expanded", String(isVisible));

@@ -15,10 +15,10 @@ class FakeTextNode {
 class FakeElement {
   constructor(tagName = 'div') {
     this.tagName = tagName.toUpperCase();
+    this.attributes = new Map();
     this.children = [];
     this.className = '';
     this.dataset = {};
-    this.hidden = false;
     this.parentNode = null;
     this.scrollHeight = 0;
     this.scrollTop = 0;
@@ -84,6 +84,40 @@ class FakeElement {
     if (value === '') {
       this.children = [];
     }
+  }
+
+  get hidden() {
+    return this.attributes.has('hidden');
+  }
+
+  set hidden(value) {
+    if (value) {
+      this.attributes.set('hidden', '');
+      return;
+    }
+
+    this.attributes.delete('hidden');
+  }
+
+  getAttribute(name) {
+    return this.attributes.get(name) ?? null;
+  }
+
+  hasAttribute(name) {
+    return this.attributes.has(name);
+  }
+
+  removeAttribute(name) {
+    this.attributes.delete(name);
+  }
+
+  setAttribute(name, value) {
+    if (name === 'hidden') {
+      this.attributes.set(name, String(value));
+      return;
+    }
+
+    this.attributes.set(name, String(value));
   }
 }
 
@@ -205,6 +239,7 @@ globalThis.__appExports = {
   appendMessage,
   getStoredMessages,
   pollConversation,
+  renderComposerDrawer,
   syncVisibleConversation,
   trackPendingConversation,
   STORAGE_KEYS,
@@ -220,6 +255,32 @@ globalThis.__appExports = {
 }
 
 describe('frontend threaded status handling', () => {
+  test('reflects hidden property changes through attribute helpers', () => {
+    const element = new FakeElement('section');
+
+    expect(element.hidden).toBe(false);
+    expect(element.getAttribute('hidden')).toBeNull();
+    expect(element.hasAttribute('hidden')).toBe(false);
+
+    element.hidden = true;
+
+    expect(element.hidden).toBe(true);
+    expect(element.getAttribute('hidden')).toBe('');
+    expect(element.hasAttribute('hidden')).toBe(true);
+
+    element.removeAttribute('hidden');
+
+    expect(element.hidden).toBe(false);
+    expect(element.getAttribute('hidden')).toBeNull();
+    expect(element.hasAttribute('hidden')).toBe(false);
+
+    element.setAttribute('hidden', 'until-found');
+
+    expect(element.hidden).toBe(true);
+    expect(element.getAttribute('hidden')).toBe('until-found');
+    expect(element.hasAttribute('hidden')).toBe(true);
+  });
+
   test('re-renders only the selected conversation when switching threads', () => {
     const { exports, localStorage } = loadApp(vi.fn());
     localStorage.setItem(exports.STORAGE_KEYS.activeConversationId, 'conversation-a');
@@ -305,6 +366,40 @@ describe('frontend threaded status handling', () => {
     expect(elements.messageHistory.children[0].children[0].children[0].textContent).toContain(
       'Hello. Save your Worker connection details',
     );
+  });
+
+  test('starts the composer drawer hidden and shows it when expanded', () => {
+    const { exports } = loadApp(vi.fn());
+    const elements = {
+      attachmentButton: new FakeElement('button'),
+      attachmentToggleBadge: new FakeElement('span'),
+      composerDrawer: new FakeElement('section'),
+    };
+    const state = {
+      composerAttachments: [],
+      isComposerDrawerExpanded: false,
+      voiceMemo: {
+        isRecording: false,
+        previewUrl: '',
+      },
+    };
+
+    elements.composerDrawer.className = 'composer-drawer';
+    elements.composerDrawer.hidden = true;
+
+    exports.renderComposerDrawer(elements, state);
+
+    expect(elements.composerDrawer.hidden).toBe(true);
+    expect(elements.composerDrawer.className).toBe('composer-drawer');
+    expect(elements.attachmentButton.getAttribute('aria-expanded')).toBe('false');
+
+    state.isComposerDrawerExpanded = true;
+    exports.renderComposerDrawer(elements, state);
+
+    expect(elements.composerDrawer.hidden).toBe(false);
+    expect(elements.composerDrawer.className).toBe('composer-drawer');
+    expect(elements.attachmentButton.classList.contains('is-active')).toBe(true);
+    expect(elements.attachmentButton.getAttribute('aria-expanded')).toBe('true');
   });
 
   test('keeps a follow-up message pending until a newer response is available', async () => {

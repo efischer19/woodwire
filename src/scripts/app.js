@@ -40,7 +40,7 @@ const MAX_CONVERSATION_NAME_LENGTH = 80;
 const BASE64_ENCODING_CHUNK_BYTES = 0x8000;
 const DEFAULT_DECRYPTION_FAILURE_MESSAGE =
   "Unable to decrypt data. Check that your saved E2EE key matches your bot.";
-const ACKNOWLEDGMENT_STATUS_VALUES = ["acknowledged", "delivered", "processed", "read"];
+const ACKNOWLEDGEMENT_STATUS_VALUES = ["acknowledged", "delivered", "processed", "read"];
 const MESSAGE_STATUS_DELIVERED = "Delivered";
 const MESSAGE_STATUS_READ = "Read";
 const MESSAGE_STATUS_SENT = "Sent";
@@ -995,7 +995,7 @@ async function pollConversation(conversation, elements, state) {
     }
 
     const payload = await readOptionalJsonResponse(response);
-    if (isAcknowledgmentOnlyPayload(payload)) {
+    if (isAcknowledgementOnlyPayload(payload)) {
       resolvePendingConversation(conversation, elements, state, MESSAGE_STATUS_READ);
       return {
         nextDelayMs: normalizePollDelay(payload?.cacheTtlSeconds),
@@ -1071,7 +1071,7 @@ async function appendAssistantReply(conversation, elements) {
   }
 
   const payload = await readOptionalJsonResponse(response);
-  if (isAcknowledgmentOnlyPayload(payload)) {
+  if (isAcknowledgementOnlyPayload(payload)) {
     return REPLY_APPEND_RESULT_READ;
   }
 
@@ -2451,7 +2451,7 @@ function resolvePendingConversation(conversation, elements, state, statusText) {
   updateMessageStatus(elements, conversation.localId, statusText, false);
 }
 
-function isAcknowledgmentOnlyPayload(payload) {
+function isAcknowledgementOnlyPayload(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return false;
   }
@@ -2464,7 +2464,7 @@ function isAcknowledgmentOnlyPayload(payload) {
   const normalizedStatus =
     typeof payload.status === "string" ? payload.status.trim().toLowerCase() : "";
 
-  return ACKNOWLEDGMENT_STATUS_VALUES.includes(normalizedStatus);
+  return ACKNOWLEDGEMENT_STATUS_VALUES.includes(normalizedStatus);
 }
 
 async function readOptionalJsonResponse(response) {

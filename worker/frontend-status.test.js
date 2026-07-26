@@ -541,6 +541,10 @@ describe('frontend threaded status handling', () => {
     ).toBe('Read');
     expect(state.pendingConversations.size).toBe(0);
     expect(elements.messageHistory.querySelectorAll('[data-response-id]').length).toBe(2);
+    expect(
+      elements.messageHistory.querySelector('[data-response-id="response-2"]').children[0].children[0]
+        .textContent,
+    ).toBe('Second reply');
     expect(exports.getStoredMessages().filter((message) => message.role === 'ai')).toEqual([
       expect.objectContaining({ id: 'response-1', responseFor: 'user-1' }),
       expect.objectContaining({ id: 'response-2', responseFor: 'user-2' }),

@@ -24,7 +24,21 @@ class FakeElement {
     this.scrollTop = 0;
     this.textContent = '';
     this.classList = {
+      add: (...classNamesToAdd) => {
+        const classNames = new Set(this.className.split(/\s+/u).filter(Boolean));
+        for (const className of classNamesToAdd) {
+          classNames.add(className);
+        }
+        this.className = Array.from(classNames).join(' ');
+      },
       contains: (className) => this.className.split(/\s+/u).filter(Boolean).includes(className),
+      remove: (...classNamesToRemove) => {
+        const classNames = new Set(this.className.split(/\s+/u).filter(Boolean));
+        for (const className of classNamesToRemove) {
+          classNames.delete(className);
+        }
+        this.className = Array.from(classNames).join(' ');
+      },
       toggle: (className, force) => {
         const classNames = new Set(this.className.split(/\s+/u).filter(Boolean));
 
@@ -449,6 +463,7 @@ describe('frontend threaded status handling', () => {
           JSON.stringify({
             audioUrl: null,
             responseId: 'response-2',
+            transcript: 'Second reply',
             transcriptUrl: null,
           }),
           { status: 200 },
@@ -490,7 +505,7 @@ describe('frontend threaded status handling', () => {
       author: 'You',
       conversationId: 'conversation-123',
       localId: 'user-2',
-      status: 'Sent · waiting for reply',
+      status: 'Sent',
       text: 'Follow-up message',
       timestamp: '2026-07-24T11:01:00.000Z',
       variant: 'user',
@@ -523,7 +538,7 @@ describe('frontend threaded status handling', () => {
     expect(
       elements.messageHistory.querySelector('[data-local-id="user-2"]').querySelector('.message-status')
         .textContent,
-    ).toBe('Reply received');
+    ).toBe('Read');
     expect(state.pendingConversations.size).toBe(0);
     expect(elements.messageHistory.querySelectorAll('[data-response-id]').length).toBe(2);
     expect(exports.getStoredMessages().filter((message) => message.role === 'ai')).toEqual([
@@ -531,5 +546,195 @@ describe('frontend threaded status handling', () => {
       expect.objectContaining({ id: 'response-2', responseFor: 'user-2' }),
     ]);
     expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  test('marks a pending message as read when the worker returns an acknowledgement payload', async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          cacheTtlSeconds: 3,
+          reply: null,
+          status: 'read',
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const { exports, localStorage } = loadApp(fetch);
+    localStorage.setItem(exports.STORAGE_KEYS.auth, 'test-auth');
+    localStorage.setItem(exports.STORAGE_KEYS.apiBase, 'https://worker.example.com');
+    localStorage.setItem(exports.STORAGE_KEYS.activeConversationId, 'conversation-ack');
+
+    const elements = {
+      messageHistory: new FakeElement('section'),
+      screenReaderStatus: new FakeElement('div'),
+    };
+    const state = {
+      pendingConversations: new Map(),
+    };
+
+    exports.appendMessage(elements, {
+      author: 'You',
+      conversationId: 'conversation-ack',
+      localId: 'user-ack',
+      status: 'Sent',
+      text: 'Check this without replying',
+      timestamp: '2026-07-24T11:02:00.000Z',
+      variant: 'user',
+    });
+
+    const pendingConversation = {
+      conversationId: 'conversation-ack',
+      localId: 'user-ack',
+      responseId: null,
+      startedAt: Date.now(),
+    };
+    exports.trackPendingConversation(state, pendingConversation);
+
+    await exports.pollConversation(pendingConversation, elements, state);
+
+    expect(
+      elements.messageHistory.querySelector('[data-local-id="user-ack"]').querySelector('.message-status')
+        .textContent,
+    ).toBe('Read');
+    expect(state.pendingConversations.size).toBe(0);
+    expect(elements.messageHistory.querySelectorAll('[data-response-id]').length).toBe(0);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('does not render an empty assistant bubble for a no-reply response payload', async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            cacheTtlSeconds: 3,
+            conversationId: 'conversation-123',
+            hasAudio: false,
+            hasTranscript: false,
+            latestResponseId: 'response-2',
+            status: 'complete',
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            audioUrl: null,
+            responseId: 'response-2',
+            transcript: '   ',
+            transcriptUrl: null,
+          }),
+          { status: 200 },
+        ),
+      );
+
+    const { exports, localStorage } = loadApp(fetch);
+    localStorage.setItem(exports.STORAGE_KEYS.auth, 'test-auth');
+    localStorage.setItem(exports.STORAGE_KEYS.apiBase, 'https://worker.example.com');
+    localStorage.setItem(exports.STORAGE_KEYS.activeConversationId, 'conversation-123');
+
+    const elements = {
+      messageHistory: new FakeElement('section'),
+      screenReaderStatus: new FakeElement('div'),
+    };
+    const state = {
+      pendingConversations: new Map(),
+    };
+
+    exports.appendMessage(elements, {
+      author: 'You',
+      conversationId: 'conversation-123',
+      localId: 'user-1',
+      status: 'Read',
+      text: 'First message',
+      timestamp: '2026-07-24T11:00:00.000Z',
+      variant: 'user',
+    });
+    exports.appendMessage(elements, {
+      author: 'AI',
+      conversationId: 'conversation-123',
+      responseFor: 'user-1',
+      responseId: 'response-1',
+      text: 'First reply',
+      timestamp: '2026-07-24T11:00:05.000Z',
+      variant: 'assistant',
+    });
+    exports.appendMessage(elements, {
+      author: 'You',
+      conversationId: 'conversation-123',
+      localId: 'user-2',
+      status: 'Sent',
+      text: 'Second message',
+      timestamp: '2026-07-24T11:01:00.000Z',
+      variant: 'user',
+    });
+
+    const pendingConversation = {
+      conversationId: 'conversation-123',
+      localId: 'user-2',
+      responseId: 'response-1',
+      startedAt: Date.now(),
+    };
+    exports.trackPendingConversation(state, pendingConversation);
+
+    await exports.pollConversation(pendingConversation, elements, state);
+
+    expect(
+      elements.messageHistory.querySelector('[data-local-id="user-2"]').querySelector('.message-status')
+        .textContent,
+    ).toBe('Read');
+    expect(state.pendingConversations.size).toBe(0);
+    expect(elements.messageHistory.querySelectorAll('[data-response-id]').length).toBe(1);
+    expect(exports.getStoredMessages().filter((message) => message.role === 'ai')).toEqual([
+      expect.objectContaining({ id: 'response-1', responseFor: 'user-1' }),
+    ]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test('marks a timed-out pending message as delivered without polling again', async () => {
+    const fetch = vi.fn();
+    const { exports, localStorage } = loadApp(fetch);
+    localStorage.setItem(exports.STORAGE_KEYS.auth, 'test-auth');
+    localStorage.setItem(exports.STORAGE_KEYS.apiBase, 'https://worker.example.com');
+    localStorage.setItem(exports.STORAGE_KEYS.activeConversationId, 'conversation-timeout');
+
+    const elements = {
+      flashMessage: new FakeElement('div'),
+      messageHistory: new FakeElement('section'),
+      screenReaderStatus: new FakeElement('div'),
+    };
+    const state = {
+      pendingConversations: new Map(),
+    };
+
+    exports.appendMessage(elements, {
+      author: 'You',
+      conversationId: 'conversation-timeout',
+      localId: 'user-timeout',
+      status: 'Sent',
+      text: 'Long-running job',
+      timestamp: '2026-07-24T11:03:00.000Z',
+      variant: 'user',
+    });
+
+    const pendingConversation = {
+      conversationId: 'conversation-timeout',
+      localId: 'user-timeout',
+      responseId: null,
+      startedAt: Date.now() - 5 * 60 * 1000,
+    };
+    exports.trackPendingConversation(state, pendingConversation);
+
+    await exports.pollConversation(pendingConversation, elements, state);
+
+    expect(
+      elements.messageHistory
+        .querySelector('[data-local-id="user-timeout"]')
+        .querySelector('.message-status').textContent,
+    ).toBe('Delivered');
+    expect(state.pendingConversations.size).toBe(0);
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

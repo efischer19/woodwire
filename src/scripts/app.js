@@ -40,7 +40,7 @@ const MAX_CONVERSATION_NAME_LENGTH = 80;
 const BASE64_ENCODING_CHUNK_BYTES = 0x8000;
 const DEFAULT_DECRYPTION_FAILURE_MESSAGE =
   "Unable to decrypt data. Check that your saved E2EE key matches your bot.";
-const ACKNOWLEDGEMENT_STATUS_VALUES = ["acknowledged", "delivered", "processed", "read"];
+const ACKNOWLEDGMENT_STATUS_VALUES = ["acknowledged", "delivered", "processed", "read"];
 const MESSAGE_STATUS_DELIVERED = "Delivered";
 const MESSAGE_STATUS_READ = "Read";
 const MESSAGE_STATUS_SENT = "Sent";
@@ -2420,6 +2420,8 @@ function normalizeAssistantTranscript(value) {
     return "";
   }
 
+  // Treat whitespace-only replies as no-reply acknowledgements so the UI does
+  // not render an empty assistant bubble for processed messages.
   return value.trim() ? value : "";
 }
 
@@ -2461,7 +2463,7 @@ function isAcknowledgementOnlyPayload(payload) {
   const normalizedStatus =
     typeof payload.status === "string" ? payload.status.trim().toLowerCase() : "";
 
-  return ACKNOWLEDGEMENT_STATUS_VALUES.includes(normalizedStatus);
+  return ACKNOWLEDGMENT_STATUS_VALUES.includes(normalizedStatus);
 }
 
 async function readOptionalJsonResponse(response) {

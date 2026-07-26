@@ -25,22 +25,22 @@ class FakeElement {
     this.textContent = '';
     this.classList = {
       add: (...classNamesToAdd) => {
-        const classNames = new Set(this.className.split(/\s+/u).filter(Boolean));
+        const classNames = getClassNameSet(this);
         for (const className of classNamesToAdd) {
           classNames.add(className);
         }
-        this.className = Array.from(classNames).join(' ');
+        syncClassName(this, classNames);
       },
       contains: (className) => this.className.split(/\s+/u).filter(Boolean).includes(className),
       remove: (...classNamesToRemove) => {
-        const classNames = new Set(this.className.split(/\s+/u).filter(Boolean));
+        const classNames = getClassNameSet(this);
         for (const className of classNamesToRemove) {
           classNames.delete(className);
         }
-        this.className = Array.from(classNames).join(' ');
+        syncClassName(this, classNames);
       },
       toggle: (className, force) => {
-        const classNames = new Set(this.className.split(/\s+/u).filter(Boolean));
+        const classNames = getClassNameSet(this);
 
         if (force === undefined ? !classNames.has(className) : force) {
           classNames.add(className);
@@ -48,7 +48,7 @@ class FakeElement {
           classNames.delete(className);
         }
 
-        this.className = Array.from(classNames).join(' ');
+        syncClassName(this, classNames);
       },
     };
   }
@@ -133,6 +133,14 @@ class FakeElement {
 
     this.attributes.set(name, String(value));
   }
+}
+
+function getClassNameSet(element) {
+  return new Set(element.className.split(/\s+/u).filter(Boolean));
+}
+
+function syncClassName(element, classNames) {
+  element.className = Array.from(classNames).join(' ');
 }
 
 function matchesSelector(element, selector) {

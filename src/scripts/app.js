@@ -995,14 +995,13 @@ async function pollConversation(conversation, elements, state) {
     }
 
     const payload = await readOptionalJsonResponse(response);
-    if (isAcknowledgementOnlyPayload(payload)) {
+    const hasNewResponse = hasPendingConversationResponse(conversation, payload);
+    if (isAcknowledgementOnlyPayload(payload) && !hasNewResponse) {
       resolvePendingConversation(conversation, elements, state, MESSAGE_STATUS_READ);
       return {
         nextDelayMs: normalizePollDelay(payload?.cacheTtlSeconds),
       };
     }
-
-    const hasNewResponse = hasPendingConversationResponse(conversation, payload);
     const statusLabel = hasNewResponse
       ? payload?.hasAudio
         ? "Voice reply ready"
@@ -2476,7 +2475,7 @@ async function readOptionalJsonResponse(response) {
   try {
     return JSON.parse(body);
   } catch {
-    throw new Error("Invalid JSON response");
+    throw new Error(`Invalid JSON response (${response.status}) from ${response.url}`);
   }
 }
 

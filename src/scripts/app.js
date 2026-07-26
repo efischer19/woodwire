@@ -40,9 +40,12 @@ const MAX_CONVERSATION_NAME_LENGTH = 80;
 const BASE64_ENCODING_CHUNK_BYTES = 0x8000;
 const DEFAULT_DECRYPTION_FAILURE_MESSAGE =
   "Unable to decrypt data. Check that your saved E2EE key matches your bot.";
+const ACKNOWLEDGEMENT_STATUS_VALUES = ["acknowledged", "delivered", "processed", "read"];
 const MESSAGE_STATUS_DELIVERED = "Delivered";
 const MESSAGE_STATUS_READ = "Read";
 const MESSAGE_STATUS_SENT = "Sent";
+const REPLY_APPEND_RESULT_PENDING = "pending";
+const REPLY_APPEND_RESULT_READ = "read";
 let fallbackMessageCounter = 0;
 let fallbackAttachmentCounter = 0;
 let importedE2eeKeyValue = "";
@@ -1012,7 +1015,7 @@ async function pollConversation(conversation, elements, state) {
 
     if (hasNewResponse) {
       const replyResult = await appendAssistantReply(conversation, elements);
-      if (replyResult === "pending") {
+      if (replyResult === REPLY_APPEND_RESULT_PENDING) {
         return {
           nextDelayMs: normalizePollDelay(payload?.cacheTtlSeconds),
         };
@@ -1069,15 +1072,15 @@ async function appendAssistantReply(conversation, elements) {
 
   const payload = await readOptionalJsonResponse(response);
   if (isAcknowledgementOnlyPayload(payload)) {
-    return "read";
+    return REPLY_APPEND_RESULT_READ;
   }
 
   if (!payload?.responseId) {
-    return "pending";
+    return REPLY_APPEND_RESULT_PENDING;
   }
 
   if (payload.responseId === conversation.responseId) {
-    return "pending";
+    return REPLY_APPEND_RESULT_PENDING;
   }
 
   if (
@@ -1085,7 +1088,7 @@ async function appendAssistantReply(conversation, elements) {
       (message) => message?.role === "ai" && message.id === payload.responseId,
     )
   ) {
-    return "read";
+    return REPLY_APPEND_RESULT_READ;
   }
 
   let transcript = normalizeAssistantTranscript(payload.transcript);
@@ -1109,12 +1112,12 @@ async function appendAssistantReply(conversation, elements) {
       });
       showFlashMessage(elements, error.message, true);
       announce(elements, "The AI reply could not be decrypted.");
-      return "read";
+      return REPLY_APPEND_RESULT_READ;
     }
   }
   const audioUrl = normalizeVoiceResponseAudioUrl(payload.audioUrl);
   if (!transcript && !audioUrl) {
-    return "read";
+    return REPLY_APPEND_RESULT_READ;
   }
 
   appendMessage(elements, {
@@ -1142,7 +1145,7 @@ async function appendAssistantReply(conversation, elements) {
         : "AI voice reply received without transcript."
       : "AI reply received.",
   );
-  return "read";
+  return REPLY_APPEND_RESULT_READ;
 }
 
 async function drainQueue(elements, state) {
@@ -2458,7 +2461,7 @@ function isAcknowledgementOnlyPayload(payload) {
   const normalizedStatus =
     typeof payload.status === "string" ? payload.status.trim().toLowerCase() : "";
 
-  return ["acknowledged", "delivered", "processed", "read"].includes(normalizedStatus);
+  return ACKNOWLEDGEMENT_STATUS_VALUES.includes(normalizedStatus);
 }
 
 async function readOptionalJsonResponse(response) {

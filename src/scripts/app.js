@@ -2420,7 +2420,7 @@ function normalizeAssistantTranscript(value) {
     return "";
   }
 
-  // Treat whitespace-only replies as no-reply acknowledgements so the UI does
+  // Treat whitespace-only replies as no-reply acknowledgments so the UI does
   // not render an empty assistant bubble for processed messages.
   return value.trim() ? value : "";
 }

@@ -995,18 +995,20 @@ async function pollConversation(conversation, elements, state) {
     }
 
     const payload = await readOptionalJsonResponse(response);
+    const statusPayload =
+      payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
     const hasNewResponse = hasPendingConversationResponse(conversation, payload);
     if (isAcknowledgementOnlyPayload(payload) && !hasNewResponse) {
       resolvePendingConversation(conversation, elements, state, MESSAGE_STATUS_READ);
       return {
-        nextDelayMs: normalizePollDelay(payload?.cacheTtlSeconds),
+        nextDelayMs: normalizePollDelay(statusPayload.cacheTtlSeconds),
       };
     }
     const statusLabel = hasNewResponse
-      ? payload?.hasAudio
+      ? statusPayload.hasAudio
         ? "Voice reply ready"
         : "Reply ready"
-      : payload?.status === "processing"
+      : statusPayload.status === "processing"
         ? "Bot is replying…"
         : "Waiting for the bot…";
 
@@ -1016,7 +1018,7 @@ async function pollConversation(conversation, elements, state) {
       const replyResult = await appendAssistantReply(conversation, elements);
       if (replyResult === REPLY_APPEND_RESULT_PENDING) {
         return {
-          nextDelayMs: normalizePollDelay(payload?.cacheTtlSeconds),
+          nextDelayMs: normalizePollDelay(statusPayload.cacheTtlSeconds),
         };
       }
 
@@ -1024,7 +1026,7 @@ async function pollConversation(conversation, elements, state) {
     }
 
     return {
-      nextDelayMs: normalizePollDelay(payload?.cacheTtlSeconds),
+      nextDelayMs: normalizePollDelay(statusPayload.cacheTtlSeconds),
     };
   } catch (error) {
     if (isNetworkFailure(error)) {
@@ -2415,12 +2417,13 @@ function focusSetupField(elements) {
 }
 
 function normalizeAssistantTranscript(value) {
+  // Normalize anything that is not meaningful transcript content into an empty
+  // string so callers can treat invalid, blank, and whitespace-only payloads
+  // as no-reply acknowledgements.
   if (typeof value !== "string") {
     return "";
   }
 
-  // Treat whitespace-only replies as no-reply acknowledgments so the UI does
-  // not render an empty assistant bubble for processed messages.
   return value.trim() ? value : "";
 }
 

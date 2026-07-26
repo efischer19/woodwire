@@ -24,32 +24,24 @@ class FakeElement {
     this.scrollTop = 0;
     this.textContent = '';
     this.classList = {
-      add: (...classNamesToAdd) => {
-        const classNames = getClassNameSet(this);
+      add: (...classNamesToAdd) => mutateClassNames(this, (classNames) => {
         for (const className of classNamesToAdd) {
           classNames.add(className);
         }
-        syncClassName(this, classNames);
-      },
+      }),
       contains: (className) => this.className.split(/\s+/u).filter(Boolean).includes(className),
-      remove: (...classNamesToRemove) => {
-        const classNames = getClassNameSet(this);
+      remove: (...classNamesToRemove) => mutateClassNames(this, (classNames) => {
         for (const className of classNamesToRemove) {
           classNames.delete(className);
         }
-        syncClassName(this, classNames);
-      },
-      toggle: (className, force) => {
-        const classNames = getClassNameSet(this);
-
+      }),
+      toggle: (className, force) => mutateClassNames(this, (classNames) => {
         if (force === undefined ? !classNames.has(className) : force) {
           classNames.add(className);
         } else {
           classNames.delete(className);
         }
-
-        syncClassName(this, classNames);
-      },
+      }),
     };
   }
 
@@ -137,6 +129,12 @@ class FakeElement {
 
 function getClassNameSet(element) {
   return new Set(element.className.split(/\s+/u).filter(Boolean));
+}
+
+function mutateClassNames(element, mutator) {
+  const classNames = getClassNameSet(element);
+  mutator(classNames);
+  syncClassName(element, classNames);
 }
 
 function syncClassName(element, classNames) {

@@ -995,7 +995,7 @@ async function pollConversation(conversation, elements, state) {
     }
 
     const payload = await readOptionalJsonResponse(response);
-    if (isAcknowledgementOnlyPayload(payload)) {
+    if (isAcknowledgmentOnlyPayload(payload)) {
       resolvePendingConversation(conversation, elements, state, MESSAGE_STATUS_READ);
       return {
         nextDelayMs: normalizePollDelay(payload?.cacheTtlSeconds),
@@ -1071,7 +1071,7 @@ async function appendAssistantReply(conversation, elements) {
   }
 
   const payload = await readOptionalJsonResponse(response);
-  if (isAcknowledgementOnlyPayload(payload)) {
+  if (isAcknowledgmentOnlyPayload(payload)) {
     return REPLY_APPEND_RESULT_READ;
   }
 
@@ -2451,11 +2451,12 @@ function resolvePendingConversation(conversation, elements, state, statusText) {
   updateMessageStatus(elements, conversation.localId, statusText, false);
 }
 
-function isAcknowledgementOnlyPayload(payload) {
+function isAcknowledgmentOnlyPayload(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return false;
   }
 
+  // Support both explicit no-reply payloads and status-only acknowledgments.
   if (payload.reply === null) {
     return true;
   }
@@ -2472,7 +2473,11 @@ async function readOptionalJsonResponse(response) {
     return null;
   }
 
-  return JSON.parse(body);
+  try {
+    return JSON.parse(body);
+  } catch {
+    throw new Error("Invalid JSON response");
+  }
 }
 
 function isVoiceAutoplayEnabled() {

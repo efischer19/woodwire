@@ -40,6 +40,12 @@ const MAX_CONVERSATION_NAME_LENGTH = 80;
 const BASE64_ENCODING_CHUNK_BYTES = 0x8000;
 const DEFAULT_DECRYPTION_FAILURE_MESSAGE =
   "Unable to decrypt data. Check that your saved E2EE key matches your bot.";
+const ACKNOWLEDGEMENT_STATUS_VALUES = ["acknowledged", "delivered", "processed", "read"];
+const MESSAGE_STATUS_DELIVERED = "Delivered";
+const MESSAGE_STATUS_READ = "Read";
+const MESSAGE_STATUS_SENT = "Sent";
+const REPLY_APPEND_RESULT_PENDING = "pending";
+const REPLY_APPEND_RESULT_READ = "read";
 let fallbackMessageCounter = 0;
 let fallbackAttachmentCounter = 0;
 let importedE2eeKeyValue = "";
@@ -862,7 +868,7 @@ async function sendMessage(message, elements, state) {
     if (shouldActivateConversation) {
       setActiveConversationId(state, payload.conversationId);
     }
-    updateMessageStatus(elements, message.localId, "Sent · waiting for reply", false);
+    updateMessageStatus(elements, message.localId, MESSAGE_STATUS_SENT, false);
     trackPendingConversation(state, {
       conversationId: payload.conversationId,
       localId: message.localId,
@@ -969,7 +975,7 @@ async function pollConversation(conversation, elements, state) {
     updateMessageStatus(
       elements,
       conversation.localId,
-      "The AI is taking longer than expected. Your message was received and will be processed.",
+      MESSAGE_STATUS_DELIVERED,
       false,
     );
     showFlashMessage(
@@ -988,32 +994,39 @@ async function pollConversation(conversation, elements, state) {
       throw await createResponseError(response);
     }
 
-    const payload = await response.json();
+    const payload = await readOptionalJsonResponse(response);
+    const statusPayload =
+      payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
     const hasNewResponse = hasPendingConversationResponse(conversation, payload);
+    if (isAcknowledgementOnlyPayload(payload) && !hasNewResponse) {
+      resolvePendingConversation(conversation, elements, state, MESSAGE_STATUS_READ);
+      return {
+        nextDelayMs: normalizePollDelay(statusPayload.cacheTtlSeconds),
+      };
+    }
     const statusLabel = hasNewResponse
-      ? payload.hasAudio
+      ? statusPayload.hasAudio
         ? "Voice reply ready"
         : "Reply ready"
-      : payload.status === "processing"
+      : statusPayload.status === "processing"
         ? "Bot is replying…"
         : "Waiting for the bot…";
 
     updateMessageStatus(elements, conversation.localId, statusLabel, false);
 
     if (hasNewResponse) {
-      const responseId = await appendAssistantReply(conversation, elements);
-      if (!responseId) {
+      const replyResult = await appendAssistantReply(conversation, elements);
+      if (replyResult === REPLY_APPEND_RESULT_PENDING) {
         return {
-          nextDelayMs: normalizePollDelay(payload.cacheTtlSeconds),
+          nextDelayMs: normalizePollDelay(statusPayload.cacheTtlSeconds),
         };
       }
 
-      clearPendingConversation(conversation.localId, state);
-      updateMessageStatus(elements, conversation.localId, "Reply received", false);
+      resolvePendingConversation(conversation, elements, state, MESSAGE_STATUS_READ);
     }
 
     return {
-      nextDelayMs: normalizePollDelay(payload.cacheTtlSeconds),
+      nextDelayMs: normalizePollDelay(statusPayload.cacheTtlSeconds),
     };
   } catch (error) {
     if (isNetworkFailure(error)) {
@@ -1058,13 +1071,17 @@ async function appendAssistantReply(conversation, elements) {
     throw await createResponseError(response);
   }
 
-  const payload = await response.json();
-  if (!payload.responseId) {
-    return null;
+  const payload = await readOptionalJsonResponse(response);
+  if (isAcknowledgementOnlyPayload(payload)) {
+    return REPLY_APPEND_RESULT_READ;
+  }
+
+  if (!payload?.responseId) {
+    return REPLY_APPEND_RESULT_PENDING;
   }
 
   if (payload.responseId === conversation.responseId) {
-    return null;
+    return REPLY_APPEND_RESULT_PENDING;
   }
 
   if (
@@ -1072,7 +1089,7 @@ async function appendAssistantReply(conversation, elements) {
       (message) => message?.role === "ai" && message.id === payload.responseId,
     )
   ) {
-    return payload.responseId;
+    return REPLY_APPEND_RESULT_READ;
   }
 
   let transcript = normalizeAssistantTranscript(payload.transcript);
@@ -1096,10 +1113,14 @@ async function appendAssistantReply(conversation, elements) {
       });
       showFlashMessage(elements, error.message, true);
       announce(elements, "The AI reply could not be decrypted.");
-      return payload.responseId;
+      return REPLY_APPEND_RESULT_READ;
     }
   }
   const audioUrl = normalizeVoiceResponseAudioUrl(payload.audioUrl);
+  if (!transcript && !audioUrl) {
+    return REPLY_APPEND_RESULT_READ;
+  }
+
   appendMessage(elements, {
     author: "AI",
     conversationId: conversation.conversationId,
@@ -1125,7 +1146,7 @@ async function appendAssistantReply(conversation, elements) {
         : "AI voice reply received without transcript."
       : "AI reply received.",
   );
-  return payload.responseId;
+  return REPLY_APPEND_RESULT_READ;
 }
 
 async function drainQueue(elements, state) {
@@ -1251,9 +1272,11 @@ function appendMessage(elements, message, options = {}) {
   const body = document.createElement("div");
   body.className = "message-body";
 
-  const text = document.createElement("p");
-  text.textContent = message.text;
-  body.append(text);
+  if (message.text) {
+    const text = document.createElement("p");
+    text.textContent = message.text;
+    body.append(text);
+  }
 
   if (message.voiceResponse?.hasAudio) {
     body.append(createVoiceResponsePlayer(elements, message.voiceResponse));
@@ -2096,6 +2119,10 @@ function getLatestConversationResponseId(conversationId) {
 }
 
 function hasPendingConversationResponse(conversation, payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return false;
+  }
+
   if (payload.status !== "complete") {
     return false;
   }
@@ -2390,7 +2417,14 @@ function focusSetupField(elements) {
 }
 
 function normalizeAssistantTranscript(value) {
-  return typeof value === "string" ? value : "";
+  // Normalize anything that is not meaningful transcript content into an empty
+  // string so callers can treat invalid, blank, and whitespace-only payloads
+  // as no-reply acknowledgements.
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim() ? value : "";
 }
 
 function normalizeVoiceResponseAudioUrl(value) {
@@ -2412,6 +2446,40 @@ function getAssistantReplyText(transcript, audioUrl) {
   }
 
   return "The bot returned an empty reply.";
+}
+
+function resolvePendingConversation(conversation, elements, state, statusText) {
+  clearPendingConversation(conversation.localId, state);
+  updateMessageStatus(elements, conversation.localId, statusText, false);
+}
+
+function isAcknowledgementOnlyPayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return false;
+  }
+
+  // Support both explicit no-reply payloads and status-only acknowledgments.
+  if (payload.reply === null) {
+    return true;
+  }
+
+  const normalizedStatus =
+    typeof payload.status === "string" ? payload.status.trim().toLowerCase() : "";
+
+  return ACKNOWLEDGEMENT_STATUS_VALUES.includes(normalizedStatus);
+}
+
+async function readOptionalJsonResponse(response) {
+  const body = await response.text();
+  if (!body.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(body);
+  } catch {
+    throw new Error(`Invalid JSON response (${response.status}) from ${response.url}`);
+  }
 }
 
 function isVoiceAutoplayEnabled() {

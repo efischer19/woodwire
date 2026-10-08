@@ -55,6 +55,15 @@
           You are offline. New messages will be queued and sent when you reconnect.
         </p>
         <p id="flash-message" class="flash-message is-hidden" role="status" aria-live="polite"></p>
+        <div id="access-session-banner" class="access-session-banner" role="alert" hidden>
+          <p>
+            Your Cloudflare Access session expired. Sign in again to keep chatting; queued
+            messages will send once you're back.
+          </p>
+          <button id="access-sign-in-button" class="primary-button" type="button">
+            Sign in again
+          </button>
+        </div>
       </section>
 
       <section id="setup-panel" class="setup-panel" aria-labelledby="setup-heading">

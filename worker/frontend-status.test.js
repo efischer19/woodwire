@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { webcrypto } from 'node:crypto';
 import vm from 'node:vm';
 
 import { describe, expect, test, vi } from 'vitest';
@@ -240,7 +241,9 @@ function loadApp(fetchImplementation) {
     URL,
     console,
     crypto: {
+      getRandomValues: (array) => webcrypto.getRandomValues(array),
       randomUUID: () => 'generated-local-id',
+      subtle: webcrypto.subtle,
     },
     document,
     fetch: fetchImplementation,
@@ -258,7 +261,9 @@ function loadApp(fetchImplementation) {
 globalThis.__appExports = {
   appendMessage,
   getStoredMessages,
+  handleAccessSessionExpired,
   pollConversation,
+  sendMessage,
   renderComposerDrawer,
   syncVisibleConversation,
   trackPendingConversation,
@@ -273,6 +278,113 @@ globalThis.__appExports = {
     localStorage,
   };
 }
+
+// Cloudflare Access answers an expired session with a redirect; with
+// redirect: "manual" fetch resolves to an opaque redirect response.
+function createAccessRedirectResponse() {
+  return { ok: false, status: 0, type: 'opaqueredirect' };
+}
+
+describe('frontend Cloudflare Access session handling', () => {
+  test('keeps polling state and the passphrase when the Access session expires', async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(createAccessRedirectResponse());
+    const { exports, localStorage } = loadApp(fetch);
+    localStorage.setItem(exports.STORAGE_KEYS.auth, 'test-auth');
+    localStorage.setItem(exports.STORAGE_KEYS.activeConversationId, 'conversation-access');
+
+    const elements = {
+      messageHistory: new FakeElement('section'),
+      screenReaderStatus: new FakeElement('div'),
+    };
+    const state = { pendingConversations: new Map() };
+
+    exports.appendMessage(elements, {
+      author: 'You',
+      conversationId: 'conversation-access',
+      localId: 'user-access',
+      status: 'Sent',
+      text: 'Are you there?',
+      timestamp: '2026-10-08T12:00:00.000Z',
+      variant: 'user',
+    });
+    const pendingConversation = {
+      conversationId: 'conversation-access',
+      localId: 'user-access',
+      responseId: null,
+      startedAt: Date.now(),
+    };
+    exports.trackPendingConversation(state, pendingConversation);
+
+    const result = await exports.pollConversation(pendingConversation, elements, state);
+
+    expect(result).toEqual({ stopLoop: true });
+    expect(fetch.mock.calls[0][1].redirect).toBe('manual');
+    expect(
+      elements.messageHistory.querySelector('[data-local-id="user-access"]').querySelector('.message-status')
+        .textContent,
+    ).toBe('Waiting for sign-in');
+    expect(state.pendingConversations.size).toBe(1);
+    expect(localStorage.getItem(exports.STORAGE_KEYS.auth)).toBe('test-auth');
+  });
+
+  test('reports a message as queued when the Access session expires during send', async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(createAccessRedirectResponse());
+    const { exports, localStorage } = loadApp(fetch);
+    localStorage.setItem(exports.STORAGE_KEYS.auth, 'test-auth');
+    localStorage.setItem(exports.STORAGE_KEYS.e2eeKey, Buffer.alloc(32, 7).toString('base64'));
+
+    const elements = {
+      messageHistory: new FakeElement('section'),
+      screenReaderStatus: new FakeElement('div'),
+    };
+    const state = { pendingConversations: new Map() };
+    const message = {
+      attachments: [],
+      conversationId: null,
+      createdAt: '2026-10-08T12:00:00.000Z',
+      localId: 'user-send-access',
+      text: 'Hello after expiry',
+    };
+
+    exports.appendMessage(elements, {
+      author: 'You',
+      localId: message.localId,
+      status: 'Sending…',
+      text: message.text,
+      timestamp: message.createdAt,
+      variant: 'user',
+    });
+
+    const sendState = await exports.sendMessage(message, elements, state);
+
+    expect(sendState).toBe('queued');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(
+      elements.messageHistory
+        .querySelector('[data-local-id="user-send-access"]')
+        .querySelector('.message-status').textContent,
+    ).toBe('Waiting for sign-in');
+    expect(localStorage.getItem(exports.STORAGE_KEYS.auth)).toBe('test-auth');
+  });
+
+  test('reveals the sign-in banner once and stops polling', () => {
+    const { exports } = loadApp(vi.fn());
+    const banner = new FakeElement('div');
+    banner.hidden = true;
+    const elements = {
+      accessSessionBanner: banner,
+      screenReaderStatus: new FakeElement('div'),
+    };
+    const state = { pendingConversations: new Map(), pollTimer: 4, queueRetryTimer: 5 };
+
+    exports.handleAccessSessionExpired(elements, state);
+
+    expect(banner.hidden).toBe(false);
+    expect(state.pollTimer).toBe(0);
+    expect(state.queueRetryTimer).toBe(0);
+    expect(elements.screenReaderStatus.textContent).toContain('Cloudflare Access session expired');
+  });
+});
 
 describe('frontend threaded status handling', () => {
   test('reflects hidden property changes through attribute helpers', () => {

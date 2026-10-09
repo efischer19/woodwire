@@ -44,12 +44,18 @@ const ACKNOWLEDGEMENT_STATUS_VALUES = ["acknowledged", "delivered", "processed",
 const MESSAGE_STATUS_DELIVERED = "Delivered";
 const MESSAGE_STATUS_READ = "Read";
 const MESSAGE_STATUS_SENT = "Sent";
+const MESSAGE_STATUS_AWAITING_SIGN_IN = "Waiting for sign-in";
+const ACCESS_SESSION_EXPIRED_CODE = "access-session-expired";
+const ACCESS_SESSION_EXPIRED_MESSAGE =
+  "Your Cloudflare Access session expired. Sign in again to keep chatting.";
 const REPLY_APPEND_RESULT_PENDING = "pending";
 const REPLY_APPEND_RESULT_READ = "read";
 let fallbackMessageCounter = 0;
 let fallbackAttachmentCounter = 0;
 let importedE2eeKeyValue = "";
 let importedE2eeKeyPromise = null;
+// Replaced during app init so any Worker call can surface the sign-in banner.
+let onAccessSessionExpired = () => {};
 
 document.addEventListener("DOMContentLoaded", () => {
   initThemeToggle();
@@ -78,6 +84,13 @@ function initChatApp() {
     queueRetryTimer: 0,
     voiceMemo: createVoiceMemoState(),
   };
+
+  onAccessSessionExpired = () => handleAccessSessionExpired(elements, state);
+  elements.accessSignInButton?.addEventListener("click", () => {
+    // A full navigation passes through Cloudflare Access, which renews the session
+    // cookie (or prompts for login) and then returns to the app.
+    window.location.assign(window.location.href);
+  });
 
   hydrateSetupForm(elements);
   initializeVoiceMemo(elements, state);
@@ -316,6 +329,8 @@ function initChatApp() {
 
 function getAppElements() {
   return {
+    accessSessionBanner: document.getElementById("access-session-banner"),
+    accessSignInButton: document.getElementById("access-sign-in-button"),
     attachmentButton: document.getElementById("attachment-button"),
     attachmentToggleBadge: document.getElementById("attachment-button-badge"),
     attachmentInput: document.getElementById("attachment-input"),
@@ -528,6 +543,10 @@ function startAttachmentUpload(file, elements, state) {
       attachment.status = "error";
       renderPendingAttachments(elements, state);
       refreshComposerControls(elements, state);
+
+      if (isAccessSessionExpired(error)) {
+        return;
+      }
 
       if (error.status === 401) {
         handleAuthenticationFailure(elements, state);
@@ -884,6 +903,11 @@ async function sendMessage(message, elements, state) {
     announce(elements, "Message sent. Waiting for a reply.");
     return "sent";
   } catch (error) {
+    if (isAccessSessionExpired(error)) {
+      updateMessageStatus(elements, message.localId, MESSAGE_STATUS_AWAITING_SIGN_IN, false);
+      return "queued";
+    }
+
     if (isNetworkFailure(error)) {
       showFlashMessage(
         elements,
@@ -1029,6 +1053,16 @@ async function pollConversation(conversation, elements, state) {
       nextDelayMs: normalizePollDelay(statusPayload.cacheTtlSeconds),
     };
   } catch (error) {
+    if (isAccessSessionExpired(error)) {
+      updateMessageStatus(
+        elements,
+        conversation.localId,
+        MESSAGE_STATUS_AWAITING_SIGN_IN,
+        false,
+      );
+      return { stopLoop: true };
+    }
+
     if (isNetworkFailure(error)) {
       updateMessageStatus(elements, conversation.localId, "Waiting to reconnect…", false);
       showFlashMessage(
@@ -2660,10 +2694,40 @@ async function workerFetch(pathname, options) {
     headers.set("X-Woodwire-Auth", auth);
   }
 
-  return fetch(url, {
+  const response = await fetch(url, {
     ...options,
     headers,
+    // Cloudflare Access answers an expired session with a redirect to its login
+    // domain. Following it cross-origin fails like a network error, so surface it.
+    redirect: "manual",
   });
+
+  if (response.type === "opaqueredirect") {
+    onAccessSessionExpired();
+    throw Object.assign(new Error(ACCESS_SESSION_EXPIRED_MESSAGE), {
+      code: ACCESS_SESSION_EXPIRED_CODE,
+    });
+  }
+
+  return response;
+}
+
+function isAccessSessionExpired(error) {
+  return error?.code === ACCESS_SESSION_EXPIRED_CODE;
+}
+
+function handleAccessSessionExpired(elements, state) {
+  stopPollingLoop(state);
+
+  if (state.queueRetryTimer) {
+    window.clearTimeout(state.queueRetryTimer);
+    state.queueRetryTimer = 0;
+  }
+
+  if (elements.accessSessionBanner && elements.accessSessionBanner.hidden) {
+    elements.accessSessionBanner.hidden = false;
+    announce(elements, ACCESS_SESSION_EXPIRED_MESSAGE);
+  }
 }
 
 async function getErrorMessage(response) {
